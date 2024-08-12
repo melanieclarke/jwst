@@ -116,3 +116,45 @@ def test_extract_nirspec_mos_multi_slit(mock_nirspec_mos, simple_wcs):
         assert np.all(spec.spec_table['FLUX_ERROR'] > 0)
 
     result.close()
+
+
+def test_extract_ignore_error_nans(mock_nirspec_fs_one_slit):
+    slit = mock_nirspec_fs_one_slit
+
+    # Set some NaNs in the input to be summed over
+    summed_extensions = ['data', 'var_rnoise', 'var_poisson', 'var_flat']
+    for i, array in enumerate(summed_extensions):
+        data = getattr(slit, array)
+
+        # one that is at the same place in all arrays
+        data[25, 25] = np.nan
+
+        # TODO: this case still fails with code changes -
+        #  for data that is good in sci but bad in var,
+        #  in sum over column
+
+        # one that is only in the variance arrays
+        if array.startswith('var'):
+            data[26, 26] = np.nan
+
+        # one that is in a different place in each array
+        data[27 + i, 27 + i] = np.nan
+
+    for i, array in enumerate(['data', 'var_rnoise', 'var_poisson', 'var_flat']):
+        data = getattr(slit, array)
+        print(data)
+
+    # Extract the data
+    result = Extract1dStep.call(slit)
+
+    # Summed data and error extensions in output
+    extensions = ['flux', 'flux_error',
+                  'surf_bright', 'sb_error',
+                  'background', 'bkgd_error']
+
+    # None of the summed extensions should have NaNs
+    for extension in extensions:
+        print(extension, result.spec[0].spec_table[extension])
+        assert not np.any(np.isnan(result.spec[0].spec_table[extension]))
+
+    result.close()

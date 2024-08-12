@@ -3847,15 +3847,23 @@ def create_extraction(extract_ref_dict,
 
         del temp_flux
 
-        error = np.sqrt(f_var_poisson + f_var_rnoise + f_var_flat)
-        sb_error = np.sqrt(sb_var_poisson + sb_var_rnoise + sb_var_flat)
-        berror = np.sqrt(b_var_poisson + b_var_rnoise + b_var_flat)
+        # Sum error components, ignoring NaNs (unless all values are NaN)
+        def _nansum_valid(components):
+            all_nan = np.all(np.isnan(components), axis=0)
+            summed = np.nansum(components, axis=0)
+            summed[all_nan] = np.nan
+            return summed
+
+        error = np.sqrt(_nansum_valid([f_var_poisson, f_var_rnoise, f_var_flat]))
+        sb_error = np.sqrt(_nansum_valid([sb_var_poisson, sb_var_rnoise, sb_var_flat]))
+        b_error = np.sqrt(_nansum_valid([b_var_poisson, b_var_rnoise, b_var_flat]))
 
         otab = np.array(
             list(
                 zip(wavelength, flux, error, f_var_poisson, f_var_rnoise, f_var_flat,
                     surf_bright, sb_error, sb_var_poisson, sb_var_rnoise, sb_var_flat,
-                    dq, background, berror, b_var_poisson, b_var_rnoise, b_var_flat, npixels)
+                    dq, background, b_error, b_var_poisson, b_var_rnoise, b_var_flat,
+                    npixels)
             ),
             dtype=datamodels.SpecModel().spec_table.dtype
         )
