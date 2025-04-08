@@ -5,15 +5,16 @@ Calls create_pipeline() which redirects based on EXP_TYPE.
 """
 
 import logging
-import numpy as np
 import copy
 
+import numpy as np
 from astropy.modeling import models
 from astropy.modeling.models import Mapping, Identity, Const1D, Scale, Tabular1D
 from astropy import units as u
 from astropy import coordinates as coord
 from astropy.io import fits
 from gwcs import coordinate_frames as cf
+from gwcs import selector
 from gwcs.wcstools import grid_from_bounding_box
 
 from stdatamodels.jwst.datamodels import (
@@ -205,7 +206,7 @@ def imaging(input_model, reference_files):
 
 def ifu(input_model, reference_files, slit_y_range=(-0.55, 0.55)):
     """
-    Create the WCS pipeline for Nirspec IFU data.
+    Create the WCS pipeline for NIRSpec IFU data.
 
     The coordinate frames are:
     "detector" : the science frame
@@ -269,16 +270,58 @@ def ifu(input_model, reference_files, slit_y_range=(-0.55, 0.55)):
 
     # DMS to SCA transform
     dms2detector = dms_to_sca(input_model)
+
     # DETECTOR to GWA transform
-    det2gwa = Identity(2) & detector_to_gwa(
-        reference_files, input_model.meta.instrument.detector, disperser
-    )
+    det2gwa = detector_to_gwa(reference_files, input_model.meta.instrument.detector, disperser)
 
     # GWA to SLIT
-    gwa2slit = gwa_to_ifuslit(slits, input_model, disperser, reference_files, slit_y_range)
+    gwa2slits = gwa_to_ifuslit(slits, input_model, disperser, reference_files, slit_y_range)
 
     # SLIT to MSA transform
     slit2slicer = ifuslit_to_slicer(slits, reference_files)
+
+    # For each slice, get the bounding box and make a pixel to slice map
+    regions = np.zeros(input_model.data.shape[-2:], dtype=np.int32)
+    transforms = {}
+    slit_by_x_msa = {}
+    for i, gwa2slit in enumerate(gwa2slits.models):
+        transform_to_slit = dms2detector | det2gwa | gwa2slit
+        bb = compute_bounding_box(transform_to_slit, wrange)
+
+        # Construct array indices for pixels in this slice
+        x, y = grid_from_bounding_box(bb, step=(1, 1), center=True)
+
+        # Set the pixel map to the slice value
+        regions[y.astype(int), x.astype(int)] = i + 1
+
+        # Keep the det to slit frame to slicer transform for the slit
+        det2slicer_transform = (
+            dms2detector | det2gwa | gwa2slit | slit2slicer.models[i] & Identity(1)
+        )
+        transforms[i + 1] = det2slicer_transform
+
+        # Inverse based on msa x value (detector y in science orientation)
+        x_value = np.round(np.nanmean(det2slicer_transform(x, y)[0]), 5)
+        slit_by_x_msa[x_value] = Mapping((0,), n_inputs=3) | Const1D(i + 1)
+
+    # Slit name mapper
+    label_mapper = selector.LabelMapperArray(regions)
+    inv_mapper = selector.LabelMapperDict(
+        inputs=("x_msa", "y_msa", "lam"),
+        mapper=slit_by_x_msa,
+        inputs_mapping=Mapping((0,), n_inputs=3),
+        atol=1e-4,
+    )
+    label_mapper.inverse = inv_mapper
+
+    # DETECTOR to SLICER transform, via a slice label mapper
+    det2slicer = selector.RegionsSelector(
+        ("x", "y"),
+        ("x_msa", "y_msa", "lam"),
+        label_mapper=label_mapper,
+        selector=transforms,
+        name="det2slicer",
+    )
 
     # SLICER to MSA Entrance
     slicer2msa = slicer_to_msa(reference_files)
@@ -295,10 +338,7 @@ def ifu(input_model, reference_files, slit_y_range=(-0.55, 0.55)):
         # If filter is "OPAQUE" or if internal lamp exposure
         # the NIRSPEC WCS pipeline stops at the MSA.
         pipeline = [
-            (det, dms2detector),
-            (sca, det2gwa.rename("detector2gwa")),
-            (gwa, gwa2slit.rename("gwa2slit")),
-            (slit_frame, slit2slicer),
+            (det, det2slicer),
             (slicer_frame, slicer2msa),
             (msa_frame, None),
         ]
@@ -328,10 +368,7 @@ def ifu(input_model, reference_files, slit_y_range=(-0.55, 0.55)):
     # "detector", "gwa", "slit_frame", "msa_frame", "oteip", "v2v3", "world"
 
     pipeline = [
-        (det, dms2detector),
-        (sca, det2gwa.rename("detector2gwa")),
-        (gwa, gwa2slit.rename("gwa2slit")),
-        (slit_frame, slit2slicer),
+        (det, det2slicer),
         (slicer_frame, slicer2msa),
         (msa_frame, msa2oteip.rename("msa2oteip")),
         (oteip, oteip2v23.rename("oteip2v23")),

@@ -944,7 +944,11 @@ def update_s_region_nrs_ifu(output_model, mod):
     mod : module
         The imported ``nirspec`` module.
     """
-    footprint, spectral_region = compute_footprint_nrs_ifu(output_model, mod)
+    # If we move to a pixel-based WCS, compute_footprint_nrs_ifu is no longer needed.
+    if "gwa" in output_model.meta.wcs.available_frames:
+        footprint, spectral_region = compute_footprint_nrs_ifu(output_model, mod)
+    else:
+        footprint, spectral_region = compute_footprint_spectral(output_model)
     update_s_region_keyword(output_model, footprint)
     output_model.meta.wcsinfo.spectral_region = spectral_region
 
