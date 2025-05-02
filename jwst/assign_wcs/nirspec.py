@@ -46,6 +46,8 @@ from stdatamodels.jwst.transforms.models import (
     Slit,
     Snell,
     RefractionIndexFromPrism,
+    SlitToIntMapper,
+    IntToSlitMapper,
 )
 
 from jwst.lib.exposure_types import is_nrs_ifu_lamp
@@ -1751,8 +1753,12 @@ def dms_to_sca(input_model):
         model = models.Identity(2)
 
     # x, y slit_name
-    transform = (subarray2full | model) & Identity(1)
-    transform.inputs = ("x", "y", "name")
+    if input_model.meta.exposure.type.lower() == 'nrs_fixedslit':
+        # These mapping is the same as in get_open_fixed_slits
+        fs_mapping = {"S200A1": 0, "S200A2": 1, "S400A1": 2, "S1600A1": 3, "S200B1": 4}
+        transform = (subarray2full | model) & SlitToIntMapper(fs_mapping)
+    else:
+        transform = (subarray2full | model) & Identity(1)
     transform.outputs = ("x", "y", "name")
 
     return transform
@@ -2466,20 +2472,10 @@ def _fix_slit_name(transform, slit_name):
 
 
 def nrs_fs_slit_id(slit_name):
-    """
-    Get the slit ID corresponding to a fixed slit name.
+    #slit_number = -100 + -1 * FIXED_SLIT_NUMS.get(slit_name, 0)
+    mapping = {'S200A1': 0, 'S200A2': 1, 'S400A1': 2, 'S1600A1': 3, 'S200B1': 4}
+    slit_number = mapping[slit_name]
 
-    Parameters
-    ----------
-    slit_name : str
-        The name of the slit to identify.
-
-    Returns
-    -------
-    int
-        The standard ID for the slit.  Returns -100 if the slit name was not recognized.
-    """
-    slit_number = -100 + -1 * FIXED_SLIT_NUMS.get(slit_name, 0)
     return slit_number
 
 
