@@ -12,7 +12,7 @@ from stdatamodels.jwst.datamodels import dqflags, ImageModel
 
 from ..source_catalog.detection import JWSTBackground
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("stpipe.jwst.tweakreg")
 
 
 def _sourcefinder_wrapper(data, threshold, mask=None, **kwargs):

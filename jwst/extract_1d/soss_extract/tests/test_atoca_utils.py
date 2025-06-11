@@ -334,7 +334,7 @@ def test_make_combined_adaptive_grid_maxsize(monkeypatch):
     # make a log watcher
     watcher = LogWatcher("Precision cannot be guaranteed: max grid size")
     monkeypatch.setattr(
-        logging.getLogger("jwst.extract_1d.soss_extract.atoca_utils"), "warning", watcher
+        logging.getLogger("stpipe.jwst.extract_1d"), "warning", watcher
     )
 
     grid_range = (0, np.pi)

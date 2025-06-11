@@ -8,7 +8,7 @@ from stcal.saturation.saturation import flag_saturated_pixels
 from ..lib import reffile_utils
 from . import x_irs2
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("stpipe.jwst.saturation")
 
 DONOTUSE = dqflags.pixel["DO_NOT_USE"]
 SATURATED = dqflags.pixel["SATURATED"]
