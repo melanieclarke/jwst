@@ -9,8 +9,7 @@ from ..lib.utilities import evaluate, filter_discovered_only
 from ..registry import AssociationRegistry
 
 # Configure logging
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
+logger = logging.getLogger("stpipe.jwst.associations")
 
 
 def generate_per_candidate(

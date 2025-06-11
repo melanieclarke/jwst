@@ -27,8 +27,8 @@ def test_duplicate_names(monkeypatch):
     # (probably stpipe or the association generator) and causes caplog
     # to sometimes miss the message
     watcher = LogWatcher("Following associations have the same product name but significant differences")
-    monkeypatch.setattr(logging.getLogger('jwst.associations.lib.prune'), "warning", watcher)
-    asns = generate(pool, rules)
+    monkeypatch.setattr(logging.getLogger('stpipe.jwst.associations'), "warning", watcher)
+    generate(pool, rules)
 
     watcher.assert_seen()
 

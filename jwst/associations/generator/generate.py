@@ -7,8 +7,7 @@ from ..pool import PoolRow
 from ...lib.progress import Bar
 
 # Configure logging
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
+logger = logging.getLogger("stpipe.jwst.associations")
 
 __all__ = ["generate"]
 
