@@ -1,9 +1,13 @@
-from ..stpipe import Step
-from . import firstframe_sub
+import logging
+
 from stdatamodels.jwst import datamodels
 
+from ..stpipe import Step
+from . import firstframe_sub
 
 __all__ = ["FirstFrameStep"]
+
+log = logging.getLogger("stpipe.jwst.firstframe")
 
 
 class FirstFrameStep(Step):
@@ -39,8 +43,8 @@ class FirstFrameStep(Step):
             # check the data is MIRI data
             detector = input_model.meta.instrument.detector.upper()
             if detector[:3] != "MIR":
-                self.log.warning("First Frame Correction is only for MIRI data")
-                self.log.warning("First frame step will be skipped")
+                log.warning("First Frame Correction is only for MIRI data")
+                log.warning("First frame step will be skipped")
                 input_model.meta.cal_step.firstframe = "SKIPPED"
                 return input_model
 

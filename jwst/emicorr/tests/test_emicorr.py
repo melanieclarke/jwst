@@ -165,17 +165,6 @@ def model_with_emi(emicorr_model):
     return emicorr_model
 
 
-@pytest.fixture()
-def module_log_watcher(monkeypatch):
-    # Set a log watcher to check for a log message at any level
-    # in the emicorr module
-    watcher = LogWatcher("")
-    logger = logging.getLogger("jwst.emicorr.emicorr")
-    for level in ["debug", "info", "warning", "error"]:
-        monkeypatch.setattr(logger, level, watcher)
-    return watcher
-
-
 def test_emicorrstep_skip_default():
     step = emicorr_step.EmiCorrStep()
     # Default is that step is skipped
@@ -221,7 +210,7 @@ def test_emicorrstep_skip_instrument(log_watcher):
     nirmdl = input_model.copy()
     nirmdl.meta.instrument.name = "NIRISS"
 
-    watcher = log_watcher("stpipe.EmiCorrStep", message="not implemented for instrument")
+    watcher = log_watcher("stpipe.jwst.emicorr", message="not implemented for instrument")
     step = emicorr_step.EmiCorrStep()
     nir_result = step.call(nirmdl, skip=False)
     watcher.assert_seen()
@@ -235,7 +224,7 @@ def test_emicorrstep_skip_readpatt(log_watcher):
     data = np.ones((1, 5, 20, 20))
     input_model = mk_data_mdl(data, "MASK1550", "ANY", "MIRIMAGE")
 
-    watcher = log_watcher("stpipe.EmiCorrStep", message="not implemented for read pattern")
+    watcher = log_watcher("stpipe.jwst.emicorr", message="not implemented for read pattern")
     step = emicorr_step.EmiCorrStep()
     result = step.call(input_model, skip=False)
     watcher.assert_seen()
@@ -253,7 +242,7 @@ def test_emicorrstep_skip_no_reffile(monkeypatch, log_watcher):
     monkeypatch.setattr(emicorr_step.EmiCorrStep, "get_reference_file", lambda *args: "N/A")
     step = emicorr_step.EmiCorrStep()
 
-    watcher = log_watcher("stpipe.EmiCorrStep", message="No reference file")
+    watcher = log_watcher("stpipe.jwst.emicorr", message="No reference file")
     result = step.call(input_model, skip=False)
     watcher.assert_seen()
 
@@ -270,7 +259,7 @@ def test_emicorrstep_skip_for_failure(monkeypatch, log_watcher):
     monkeypatch.setattr(emicorr, "apply_emicorr", lambda *args, **kwargs: None)
     step = emicorr_step.EmiCorrStep()
 
-    watcher = log_watcher("stpipe.EmiCorrStep", message="Step skipped")
+    watcher = log_watcher("stpipe.jwst.emicorr", message="Step skipped")
     result = step.call(input_model, skip=False)
     watcher.assert_seen()
 
@@ -283,7 +272,7 @@ def test_emicorrstep_skip_for_small_groups(log_watcher):
     data = np.ones((1, 2, 20, 20))
     input_model = mk_data_mdl(data, "MASK1550", "FAST", "MIRIMAGE")
 
-    watcher = log_watcher("jwst.emicorr.emicorr", message="cannot be performed for ngroups=2")
+    watcher = log_watcher("stpipe.jwst.emicorr", message="cannot be performed for ngroups=2")
     step = emicorr_step.EmiCorrStep()
     result = step.call(input_model, skip=False)
     watcher.assert_seen()
@@ -413,7 +402,7 @@ def test_apply_emicorr_with_freq(
     output_name = tmp_path / f"otf_reffile.{output_ext}"
     expected_output_name = tmp_path / "otf_reffile.asdf"
 
-    watcher = log_watcher("jwst.emicorr.emicorr", message="'joint' algorithm cannot be used")
+    watcher = log_watcher("stpipe.jwst.emicorr", message="'joint' algorithm cannot be used")
 
     # emicorr model is ignored if user frequencies are provided - any placeholder will work
     outmdl = emicorr.apply_emicorr(
@@ -444,7 +433,7 @@ def test_apply_emicorr_no_config_found(log_watcher, emicorr_model):
     data = np.ones((1, 5, 20, 20))
     input_model = mk_data_mdl(data, "SUB64", "FAST", "MIRIMAGE")
 
-    watcher = log_watcher("jwst.emicorr.emicorr", message="No correction match")
+    watcher = log_watcher("stpipe.jwst.emicorr", message="No correction match")
     result = emicorr.apply_emicorr(input_model, emicorr_model)
     assert result is None
     watcher.assert_seen()
@@ -483,7 +472,7 @@ def test_get_subarcase_bad_readpatt(emicorr_model, log_watcher):
 
     # readpattern not recognized
     readpatt = "ANY"
-    watcher = log_watcher("jwst.emicorr.emicorr", message="does not include expected string")
+    watcher = log_watcher("stpipe.jwst.emicorr", message="does not include expected string")
     subarray_info_r = emicorr.get_subarcase(emicorr_model, subarray, readpatt, detector)
     watcher.assert_seen()
 
@@ -496,7 +485,7 @@ def test_get_subarcase_missing_subarray(emicorr_model, log_watcher):
 
     # subarray not recognized
     subarray = "ANY"
-    watcher = log_watcher("jwst.emicorr.emicorr", message="Subarray ANY not found")
+    watcher = log_watcher("stpipe.jwst.emicorr", message="Subarray ANY not found")
     subarray_info_r = emicorr.get_subarcase(emicorr_model, subarray, readpatt, detector)
     watcher.assert_seen()
 
