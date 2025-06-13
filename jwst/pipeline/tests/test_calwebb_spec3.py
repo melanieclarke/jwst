@@ -1,8 +1,8 @@
-import pytest
 import os
-import numpy as np
 
+import pytest
 import stdatamodels.jwst.datamodels as dm
+
 import jwst
 from jwst.datamodels import SourceModelContainer
 from jwst.datamodels.utils.wfss_multispec import make_wfss_multiexposure
@@ -14,6 +14,7 @@ from jwst.extract_1d.tests.conftest import mock_niriss_wfss_l2, mock_nirspec_fs_
 INPUT_WFSS = "mock_wfss_cal.fits"
 INPUT_WFSS_2 = "mock_wfss_2_cal.fits"
 INPUT_ASN = "mock_wfss_asn.json"
+
 
 @pytest.fixture
 def spec3_wfss_asn(mock_niriss_wfss_l2, tmp_cwd):
