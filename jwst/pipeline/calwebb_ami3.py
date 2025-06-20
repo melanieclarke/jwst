@@ -11,8 +11,7 @@ from jwst.ami import ami_normalize_step
 __all__ = ["Ami3Pipeline"]
 
 # Define logging
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.pipeline")
 
 
 class Ami3Pipeline(Pipeline):
@@ -110,7 +109,6 @@ class Ami3Pipeline(Pipeline):
                 result.meta.asn.table_name = Path(asn.filename).name
 
                 # Perform blending of metadata for all inputs to this output file
-                # self.log.info('Blending metadata for PSF normalized target')
                 self.save_model(result, suffix="aminorm-oi")
                 result.close()
             del psf_lg

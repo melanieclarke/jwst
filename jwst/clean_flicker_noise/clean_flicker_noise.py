@@ -20,8 +20,7 @@ from jwst.msaflagopen import MSAFlagOpenStep
 from jwst.ramp_fitting import RampFitStep
 
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.clean_flicker_noise")
 
 # Fixed slit region to mask, for NIRSpec MOS and IFU data
 # Values are y start and stop indices, for the edges of the
@@ -58,7 +57,8 @@ def make_rate(input_model, input_dir="", return_cube=False):
     log.info("Creating draft rate file for scene masking")
     step = RampFitStep()
     step.input_dir = input_dir
-    with LoggingContext(step.log, level=logging.WARNING):
+    ramp_log = logging.getLogger("stpipe.jwst.ramp_fitting")
+    with LoggingContext(ramp_log, level=logging.WARNING):
         # Note: the copy is currently needed because ramp fit
         # closes the input model when it's done, and we need
         # it to stay open.
@@ -116,7 +116,8 @@ def post_process_rate(
         log.info("Assigning a WCS for scene masking")
         step = AssignWcsStep()
         step.input_dir = input_dir
-        with LoggingContext(step.log, level=logging.WARNING):
+        assign_wcs_log = logging.getLogger("stpipe.jwst.assign_wcs")
+        with LoggingContext(assign_wcs_log, level=logging.WARNING):
             output_model = step.run(output_model)
 
     # If needed, flag open MSA shutters
@@ -124,7 +125,8 @@ def post_process_rate(
         log.info("Flagging failed-open MSA shutters for scene masking")
         step = MSAFlagOpenStep()
         step.input_dir = input_dir
-        with LoggingContext(step.log, level=logging.WARNING):
+        msaflag_log = logging.getLogger("stpipe.jwst.msaflagopen")
+        with LoggingContext(msaflag_log, level=logging.WARNING):
             output_model = step.run(output_model)
 
     # If needed, draft a flat correction to retrieve non-science areas
@@ -132,7 +134,8 @@ def post_process_rate(
         log.info("Retrieving flat DQ values for scene masking")
         step = FlatFieldStep()
         step.input_dir = input_dir
-        with LoggingContext(step.log, level=logging.WARNING):
+        flat_log = logging.getLogger("stpipe.jwst.flatfield")
+        with LoggingContext(flat_log, level=logging.WARNING):
             flat_corrected_model = step.run(output_model)
 
         # Copy out the flat DQ plane, leave the data as is

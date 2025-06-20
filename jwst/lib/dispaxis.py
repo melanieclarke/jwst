@@ -1,7 +1,6 @@
 import logging
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.lib")
 
 
 def get_dispersion_direction(exposure_type, grating="ANY", filter_wh="ANY", pupil="ANY"):

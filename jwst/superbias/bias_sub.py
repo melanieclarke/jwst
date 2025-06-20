@@ -4,8 +4,7 @@ import numpy as np
 import logging
 from jwst.lib import reffile_utils
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.superbias")
 
 
 def do_correction(input_model, bias_model):

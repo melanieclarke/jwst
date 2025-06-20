@@ -9,8 +9,7 @@ from . import instrument_data
 from . import nrm_core
 from . import utils
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.ami")
 
 
 def apply_lg_plus(

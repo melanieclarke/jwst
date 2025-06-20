@@ -19,8 +19,7 @@ from . import _fileio
 
 import logging
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.outlier_detection")
 
 
 DO_NOT_USE = datamodels.dqflags.pixel["DO_NOT_USE"]
