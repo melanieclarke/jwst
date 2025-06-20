@@ -1,25 +1,26 @@
+import logging
 import os
 import shutil
 
 import pytest
 
-from jwst.stpipe import Step
 from jwst.datamodels import ImageModel  # type: ignore[attr-defined]
+from jwst.pipeline import Image2Pipeline
+from jwst.stpipe import Step
 
 
-INPUT_FILE = "dummy_rate.fits"
-INPUT_FILE_2 = "dummy2_rate.fits"
-INPUT_ASN = "dummy_asn.json"
+INPUT_FILE = "mock_rate.fits"
+INPUT_FILE_2 = "mock2_rate.fits"
+INPUT_ASN = "mock_asn.json"
 OUTPUT_FILE = "custom_name.fits"
 OUTPUT_FILE_ASN = "custom_name_asn.fits"  # cannot reuse because everything runs in same cwd
 LOGFILE = "run_asn.log"
-LOGCFG = "test_logs.cfg"
 
 
 @pytest.fixture(scope="module")
-def make_dummy_rate_file(tmp_cwd_module):
+def make_mock_rate_file(tmp_cwd_module):
     """
-    Make and save a dummy rate file in the temporary working directory
+    Make and save a mock rate file in the temporary working directory
     Partially copied from test_background.py
     """
 
@@ -55,13 +56,13 @@ def make_dummy_rate_file(tmp_cwd_module):
 
 
 @pytest.fixture(scope="module")
-def make_dummy_association(make_dummy_rate_file):
+def make_mock_association(make_mock_rate_file):
     shutil.copy(INPUT_FILE, INPUT_FILE_2)
     os.system(f"asn_from_list -o {INPUT_ASN} -r DMSLevel2bBase {INPUT_FILE} {INPUT_FILE_2}")
 
 
 @pytest.fixture(scope="module", params=[OUTPUT_FILE])
-def run_image2_pipeline_file(make_dummy_rate_file, request):
+def run_image2_pipeline_file(make_mock_rate_file, request):
     """
     Run pipeline, skipping most steps
     """
@@ -78,29 +79,26 @@ def run_image2_pipeline_file(make_dummy_rate_file, request):
 
 
 @pytest.fixture(scope="module", params=[OUTPUT_FILE_ASN])
-def run_image2_pipeline_asn(make_dummy_association, request):
+def run_image2_pipeline_asn(make_mock_association, request):
     """
     Two-product association passed in. This should trigger a warning
     and the output_file parameter should be ignored.
     """
+    steps = {
+        "flat_field": {"skip": True},
+        "photom": {"skip": True},
+        "resample": {"skip": True},
+    }
+
     # save warnings to logfile so can be checked later
-    logcfg_content = f"[*] \n \
-        level = INFO \n \
-        handler = file:{LOGFILE}"
-    with open(LOGCFG, "w") as f:
-        f.write(logcfg_content)
-
-    args = [
-        "calwebb_image2",
-        INPUT_ASN,
-        f"--logcfg={LOGCFG}",
-        "--steps.flat_field.skip=true",
-        "--steps.photom.skip=true",
-        "--steps.resample.skip=true",
-        f"--output_file={request.param}",
-    ]
-
-    Step.from_cmdline(args)
+    log = logging.getLogger("stpipe")
+    handler = logging.FileHandler(LOGFILE)
+    log.addHandler(handler)
+    try:
+        Image2Pipeline.call(INPUT_ASN, steps=steps, output_file=request.param)
+    finally:
+        log.removeHandler(handler)
+        handler.close()
 
 
 def test_output_file_rename_file(run_image2_pipeline_file):

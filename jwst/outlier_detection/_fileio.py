@@ -1,7 +1,6 @@
 import logging
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.outlier_detection")
 
 
 def save_median(median_model, make_output_path):

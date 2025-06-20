@@ -17,8 +17,7 @@ from .util import (
 )
 from . import pointing
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.assign_wcs")
 
 
 __all__ = ["create_pipeline", "imaging"]

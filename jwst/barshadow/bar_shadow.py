@@ -7,8 +7,7 @@ from scipy import ndimage
 from stdatamodels.jwst import datamodels
 
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.barshadow")
 
 # Fallback value for ratio of slit spacing to slit height
 SLITRATIO = 1.15

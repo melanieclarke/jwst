@@ -13,8 +13,7 @@ from jwst.guider_cds import guider_cds_step
 __all__ = ["GuiderPipeline"]
 
 # Define logging
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.pipeline")
 
 
 class GuiderPipeline(Pipeline):

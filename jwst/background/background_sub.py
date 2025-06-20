@@ -10,8 +10,7 @@ from astropy.utils.exceptions import AstropyUserWarning
 
 import logging
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.background")
 
 
 class ImageSubsetArray:

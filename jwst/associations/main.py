@@ -15,8 +15,7 @@ from jwst.associations.lib.log_config import log_config, DMS_config
 
 __all__ = ["Main", "main"]
 
-# Configure logging
-logger = log_config(name=__package__)
+logger = logging.getLogger("stpipe.jwst.associations")
 
 
 class Main:
@@ -125,7 +124,7 @@ class Main:
         logging_config = None
         if parsed.DMS_enabled:
             logging_config = DMS_config
-        logger = log_config(name=__package__, config=logging_config)
+        logger = log_config(name="stpipe.jwst.associations", config=logging_config)
         logger.setLevel(parsed.loglevel)
         config.DEBUG = (parsed.loglevel != 0) and (parsed.loglevel <= logging.DEBUG)
 
@@ -301,7 +300,7 @@ class Main:
             action="store_const",
             dest="loglevel",
             const=logging.INFO,
-            default=logging.NOTSET,
+            default=logging.CRITICAL,
             help="Output progress and results.",
         )
         parser.add_argument(

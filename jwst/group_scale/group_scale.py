@@ -1,12 +1,8 @@
-#
-#  Module for rescaling grouped data for NFRAME
-#  not equal to a power of 2
-#
+"""Module for rescaling grouped data for NFRAME not equal to a power of 2."""
 
 import logging
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.group_scale")
 
 
 def do_correction(model):

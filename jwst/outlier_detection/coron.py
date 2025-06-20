@@ -11,8 +11,7 @@ from jwst.resample.resample_utils import build_mask
 from .utils import create_cube_median, flag_model_crs
 from ._fileio import save_median
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.outlier_detection")
 
 
 __all__ = ["detect_outliers"]

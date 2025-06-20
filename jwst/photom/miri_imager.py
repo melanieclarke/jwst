@@ -1,8 +1,7 @@
 import logging
 import numpy as np
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.photom")
 
 
 def time_corr_photom(param, t):

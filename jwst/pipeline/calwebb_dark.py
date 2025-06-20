@@ -22,8 +22,7 @@ from jwst.linearity import linearity_step
 __all__ = ["DarkPipeline"]
 
 # Define logging
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.pipeline")
 
 
 class DarkPipeline(Pipeline):

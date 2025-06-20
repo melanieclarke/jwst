@@ -1,12 +1,9 @@
-#
-#  Module for applying fringe correction
-#
+"""Module for applying fringe correction."""
 
 import logging
 import numpy as np
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.fringe")
 
 
 def do_correction(input_model, fringe_model):

@@ -6,8 +6,7 @@ from jwst.assign_wcs.util import wrap_ra
 from gwcs import wcstools
 import logging
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.cube_build")
 
 
 # ******************************************************************************

@@ -4,8 +4,7 @@ import numpy as np
 
 from stdatamodels.jwst import datamodels
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("stpipe.jwst.lib")
 
 
 def is_subarray(input_model):
