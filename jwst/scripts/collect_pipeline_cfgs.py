@@ -7,10 +7,6 @@ from pathlib import Path
 from jwst.pipeline.collect_pipeline_cfgs import collect_pipeline_cfgs
 
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-
 def main():
     """
     Get copies of all the cfg files currently in use by the jwst pipeline software.
@@ -18,6 +14,9 @@ def main():
     Use from terminal as follows:
     $ collect_pipeline_cfgs .
     """
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
     if len(sys.argv) < 2:
         logging.error("ERROR: missing argument (destination directory")
         sys.exit(1)

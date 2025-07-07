@@ -10,9 +10,6 @@ from pathlib import Path
 
 from jwst.lib.set_velocity_aberration import add_dva
 
-# Configure logging
-logger = logging.getLogger("stpipe.jwst.scripts")
-
 
 def parse_args(args):
     """
@@ -68,6 +65,11 @@ def parse_args(args):
 def main():
     """Parse arguments and add velocity aberration correction information to the files provided."""
     args = parse_args(sys.argv[1:])
+
+    # Configure logging
+    logger = logging.getLogger("stpipe")
+    logger.addHandler(logging.NullHandler())
+
     for filename in args.filename:
         add_dva(filename)
 

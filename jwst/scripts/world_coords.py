@@ -28,10 +28,6 @@ from stdatamodels.jwst.datamodels.util import open as dmopen
 from jwst.assign_wcs import nirspec
 
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-
 def main():
     """Loop over the input files and apply the proper method to create the output file."""
     short_description = "Create NIRSPEC world coordinates file"
@@ -78,6 +74,11 @@ def main():
     parser.add_argument("-m", "--mode", default=None, help="set exposure mode")
 
     res = parser.parse_args()
+
+    # Configure logging
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
     filenames = res.filenames
     mode = res.mode
 
