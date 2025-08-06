@@ -10,8 +10,6 @@ from jwst.dq_init import dq_init_step
 from jwst.emicorr import emicorr_step
 from jwst.firstframe import firstframe_step
 from jwst.gain_scale import gain_scale_step
-
-# step imports
 from jwst.group_scale import group_scale_step
 from jwst.ipc import ipc_step
 from jwst.jump import jump_step
@@ -24,6 +22,7 @@ from jwst.reset import reset_step
 from jwst.rscd import rscd_step
 from jwst.saturation import saturation_step
 from jwst.stpipe import Pipeline
+from jwst.stpipe.utilities import record_step_status
 from jwst.superbias import superbias_step
 
 __all__ = ["Detector1Pipeline"]
@@ -101,77 +100,88 @@ class Detector1Pipeline(Pipeline):
             # process MIRI exposures;
             # the steps are in a different order than NIR
             log.debug("Processing a MIRI exposure")
-
-            input_data = self.group_scale.run(input_data)
-            input_data = self.dq_init.run(input_data)
-            input_data = self.emicorr.run(input_data)
-            input_data = self.saturation.run(input_data)
-            input_data = self.ipc.run(input_data)
-            input_data = self.firstframe.run(input_data)
-            input_data = self.lastframe.run(input_data)
-            input_data = self.reset.run(input_data)
-            input_data = self.linearity.run(input_data)
-            input_data = self.rscd.run(input_data)
-            input_data = self.dark_current.run(input_data)
-            input_data = self.refpix.run(input_data)
-
-            # skip until MIRI team has figured out an algorithm
-            # input_data = self.persistence(input_data)
-
+            cal_steps = [
+                "group_scale",
+                "dq_init",
+                "emicorr",
+                "saturation",
+                "ipc",
+                "firstframe",
+                "lastframe",
+                "reset",
+                "linearity",
+                "rscd",
+                "dark_current",
+                "refpix",
+            ]
         else:
             # process Near-IR exposures
             log.debug("Processing a Near-IR exposure")
-
-            input_data = self.group_scale.run(input_data)
-            input_data = self.dq_init.run(input_data)
-            input_data = self.saturation.run(input_data)
-            input_data = self.ipc.run(input_data)
-            input_data = self.superbias.run(input_data)
-            input_data = self.refpix.run(input_data)
-            input_data = self.linearity.run(input_data)
+            cal_steps = [
+                "group_scale",
+                "dq_init",
+                "saturation",
+                "ipc",
+                "superbias",
+                "refpix",
+                "linearity",
+            ]
 
             # skip persistence for NIRSpec
             if instrument != "NIRSPEC":
-                input_data = self.persistence.run(input_data)
+                cal_steps.append("persistence")
 
-            input_data = self.dark_current.run(input_data)
+            # run dark_current for all NIR
+            cal_steps.append("dark_current")
 
-        # apply the charge_migration step
-        input_data = self.charge_migration.run(input_data)
+        # Add a few steps for all instruments
+        cal_steps.extend(["charge_migration", "jump", "clean_flicker_noise"])
 
-        # apply the jump step
-        input_data = self.jump.run(input_data)
-
-        # apply the clean_flicker_noise step
-        input_data = self.clean_flicker_noise.run(input_data)
+        # Run all the steps so far.
+        # To save memory, don't attempt to run steps marked "skip".
+        for cal_step in cal_steps:
+            step = getattr(self, cal_step)
+            if step.skip:
+                # Just record the status as "SKIPPED"
+                if cal_step == "dark_current":
+                    # Exception: dark_current is recorded as "dark_sub"
+                    record_step_status(input_data, "dark_sub", False)
+                else:
+                    record_step_status(input_data, cal_step, False)
+            else:
+                # Run the step
+                input_data = step.run(input_data)
 
         # save the corrected ramp data, if requested
         if self.save_calibrated_ramp:
             self.save_model(input_data, "ramp")
 
-        # apply the ramp_fit step
-        # This explicit test on self.ramp_fit.skip is a temporary workaround
-        # to fix the problem that the ramp_fit step ordinarily returns two
-        # objects, but when the step is skipped due to `skip = True`,
-        # only the input is returned when the step is invoked.
+        # Apply the ramp_fit step.
+        # If skipped, set ints_model to None, since it is not created.
         if self.ramp_fit.skip:
-            input_data = self.ramp_fit.run(input_data)
+            record_step_status(input_data, "ramp_fit", False)
             ints_model = None
         else:
             input_data, ints_model = self.ramp_fit.run(input_data)
 
         # apply the gain_scale step to the exposure-level product
         if input_data is not None:
-            self.gain_scale.suffix = "gain_scale"
-            input_data = self.gain_scale.run(input_data)
+            if self.gain_scale.skip:
+                record_step_status(input_data, "gain_scale", False)
+            else:
+                self.gain_scale.suffix = "gain_scale"
+                input_data = self.gain_scale.run(input_data)
         else:
             log.info("NoneType returned from ramp_fit.  Gain Scale step skipped.")
 
         # apply the gain scale step to the multi-integration product,
         # if it exists, and then save it
         if ints_model is not None:
-            self.gain_scale.suffix = "gain_scaleints"
-            ints_model = self.gain_scale.run(ints_model)
+            if self.gain_scale.skip:
+                record_step_status(ints_model, "gain_scale", False)
+            else:
+                self.gain_scale.suffix = "gain_scaleints"
+                ints_model = self.gain_scale.run(ints_model)
             self.save_model(ints_model, "rateints")
 
         # setup output_file for saving
