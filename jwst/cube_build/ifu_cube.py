@@ -4,6 +4,11 @@ import logging
 import math
 import warnings
 
+import pdb
+import pydl.pydlutils.bspline as bs
+from astropy.stats import sigma_clipped_stats as scs
+from astropy.io import fits
+
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
@@ -24,6 +29,297 @@ from jwst.model_blender import blendmeta
 log = logging.getLogger(__name__)
 
 __all__ = ["IFUCubeData", "IncorrectInputError", "IncorrectParameterError"]
+
+# Bspline iteration doesn't seem to be working, write my own in a wrapper
+def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, verbose=False):
+    xvec_use = xvec.copy()
+    yvec_use = yvec.copy()
+    sset = 0
+
+    for ii in range(0, wrapiter):
+        sset, _ = bs.iterfit(xvec_use, yvec_use, nbkpts=nbkpts)
+        ytemp, _ = sset.value(xvec_use)
+        diff = yvec_use - ytemp
+        rms = np.nanstd(diff)
+        rej = np.where((diff < -wrapsig_low * rms) | (diff > wrapsig_high * rms))
+        keep = np.where((diff >= -wrapsig_low * rms) & (diff <= wrapsig_high * rms))
+        if verbose:
+            print('Rejected', len(rej[0]), 'Kept', len(keep[0]))
+        xvec_use = xvec_use[keep]
+        yvec_use = yvec_use[keep]
+
+    return sset
+
+# Function to convert pixel positions on the old grid to doubled pixel positions
+# E.g., [0,1,2,3,4,5] goes to [-0.25, 0.25, 0.75, 1.25, 1.75, etc]
+def reindex(xvec):
+    # Indices in the new array
+    newx=np.arange(np.nanmin(xvec)*2,np.nanmax(xvec+1)*2).astype(int)
+    # Where were these indices in the old array?
+    oldx=newx/2 -0.25
+    return newx,oldx
+
+def getweights(ratio, tempfit):
+    # Weights start off proportional to flux of the model
+    weights = tempfit.copy()
+    # Identify the 7 largest weight points
+    order = np.argsort(weights)
+    indx = np.where(weights >= weights[order[-7]])
+    # Sigma-clipped mean and rms of these 7 ratios
+    mean, _, rms = scs(ratio[indx])
+    # Bad if over 2 sigma away
+    bad = np.where(np.abs(mean - ratio) > 2 * rms)
+    weights[bad] = 0
+
+    # Normalize weights
+    weights = weights / np.nansum(weights)
+
+    return weights
+
+def drl_oversample(model,writeout=False):
+    basex, basey = np.meshgrid(np.arange(2048), np.arange(2048))
+    beta_orig, alpha_orig, _ = model.meta.wcs.transform('detector', 'slicer', basex, basey)
+    flux_orig = model.data
+
+    uqbeta = np.unique(beta_orig[np.isfinite(beta_orig)])
+    # Make a slice map
+    slmap = np.zeros_like(basex) * np.nan
+    for ii in range(0, len(uqbeta)):
+        indx = np.where(beta_orig == uqbeta[ii])
+        slmap[indx] = ii
+
+    # Oversampled flux array
+    flux_os = np.zeros([4096, 2048]) * np.nan
+    x_os = np.zeros([4096, 2048]) * np.nan
+    y_os = np.zeros([4096, 2048]) * np.nan
+
+    drlstart, drlstop = 0, 2048
+
+    for slnum in range(0, 30):
+        print('Oversampling slice ', slnum)
+        indx = np.where(beta_orig == uqbeta[slnum])
+        # Data Naned out for everything except this slice
+        thisdata = np.zeros_like(flux_orig) * np.nan
+        thisdata[indx] = flux_orig[indx]
+        # X and Y detector coordinates Naned out for everything except this slice
+        thisx = np.zeros_like(flux_orig) * np.nan
+        thisx[indx] = basex[indx]
+        thisy = np.zeros_like(flux_orig) * np.nan
+        thisy[indx] = basey[indx]
+        # Alpha and beta coordinates Naned out for everything except this slice
+        thisalpha = np.zeros_like(flux_orig) * np.nan
+        thisalpha[indx] = alpha_orig[indx]
+        thisbeta = np.zeros_like(flux_orig) * np.nan
+        thisbeta[indx] = beta_orig[indx]
+
+        for ii in range(drlstart, drlstop):
+            # print(ii)
+            # Are there sufficient values in this column to do anything?
+            temp = thisdata[:, ii].copy()
+            temp = temp[np.isfinite(temp)]
+            ngood = len(temp)
+
+            if (ngood > 15):
+                # Y pixel coordinates in a given column
+                # Convert back to integer (cuz integers can't have NaN values)
+                tempy = thisy[:, ii]
+                tempy = tempy[np.isfinite(tempy)].astype(int)
+                # newy is the resampled Y pixel indices in the expanded detector frame
+                # oldy is the resampled Y pixel indices in the original detector frame
+                newy, oldy = reindex(tempy)
+
+                # Do coordinate grids
+                x_os[newy, ii] = ii
+                y_os[newy, ii] = oldy
+
+                # Is the peak value over 100?  If not do linear interpolation.  If so do bspline.
+                if (np.nanmax(thisdata[:, ii]) < 100):
+                    val1, val2 = thisy[:, ii], thisdata[:, ii]
+                    indx = np.where((np.isfinite(val1)) & (np.isfinite(val2)))
+                    interpval = np.interp(oldy, val1[indx], val2[indx])
+                    interpval[0:2] = np.nan
+                    interpval[-2:] = np.nan
+                    flux_os[newy, ii] = interpval
+                else:
+                    # Define a wavelength range in which to fit the bspline model as a function of alpha
+                    # This is really detector X coordinate, but we'll call it l to avoid confusion elsewhere
+                    lstart, lstop = ii - 50, ii + 50
+                    # Deal with detector edges
+                    lstart = np.max(np.array([lstart, 0]))
+                    lstop = np.min(np.array([lstop, 2048]))
+                    # All alpha and data values in this region
+                    alphatemp = thisalpha[:, lstart:lstop].ravel()
+                    datatemp = thisdata[:, lstart:lstop].ravel()
+                    # Vector describing the full alpha range with good sampling
+                    alphavec = np.arange(np.nanmin(alphatemp), np.nanmax(alphatemp),
+                                         (np.nanmax(alphatemp) - np.nanmin(alphatemp)) / 100)
+                    # Cut down alphavec and betavec to only finite values
+                    indx = np.where(np.isfinite(datatemp))
+                    alphatemp = alphatemp[indx]
+                    datatemp = datatemp[indx]
+                    # sort by increasing alpha
+                    indx = np.argsort(alphatemp)
+                    alphatemp = alphatemp[indx]
+                    datatemp = datatemp[indx]
+                    # Fit a bspline
+                    # 30 discrete pixels across the trace, so have double this number of breakpoints
+                    sset = bspline_wrap(alphatemp, datatemp, nbkpts=60, wrapsig_low=2.5, wrapsig_high=2.5, wrapiter=10,
+                                        verbose=False)
+                    # Evaluate bspline on alphavec to get an idea of the fit
+                    datafit, _ = sset.value(alphavec)
+
+                    # Plot all data values in the range
+                    #if plots:
+                    #    for jj in range(lstart, lstop):
+                    #        plt.plot(thisalpha[:, jj], thisdata[:, jj], 'x')
+                    #    # And the data values in the first column
+                    #    plt.plot(thisalpha[:, ii], thisdata[:, ii], 's', ms=15)
+                    #    plt.plot(alphavec, datafit, linewidth=3)
+                    #    plt.title(str(ii))
+                    #    plt.grid()
+                    #    plt.show()
+
+                    tempalpha = thisalpha[:, ii]
+                    tempvalues = thisdata[:, ii]
+                    indx = np.where(np.isfinite(tempvalues) & np.isfinite(tempalpha))
+                    tempalpha = tempalpha[indx]
+                    tempvalues = tempvalues[indx]
+
+                    # Evaluate the bspline at the alpha for input Y locations
+                    tempfit, _ = sset.value(tempalpha)
+                    # Determine the normalization by the weighted mean ratio between model and data
+                    # Weights are based on the model so that we can reject outliers
+                    ratio = tempvalues / tempfit
+
+                    # Weights start off proportional to flux
+                    weights = getweights(ratio, tempfit)
+                    wmeanratio = np.nansum(ratio * weights)
+
+                    #if plots:
+                    #    plt.plot(tempalpha, tempvalues, 'x', label='orig')
+                    #    plt.plot(tempalpha, tempfit * wmeanratio, 's', label='fit')
+                    #    plt.legend()
+                    #    plt.title(str(ii))
+                    #    plt.show()
+                    #    plt.plot(tempalpha, weights, 's')
+                    #    plt.grid()
+                    #    plt.title(str(ii))
+                    #    plt.show()
+                    #    plt.plot(tempalpha, ratio, 's')
+                    #    plt.grid()
+                    #    plt.title(str(ii))
+                    #    plt.show()
+
+                    # What are the alpha values over sampled points in the old frame?
+                    _, tempalpha, _ = model.meta.wcs.transform('detector', 'slicer', np.repeat(ii, len(oldy)), oldy)
+                    # Evaluate the bspline at the alpha for these Y locations
+                    tempfit, _ = sset.value(tempalpha)
+                    tempfit[0:2] = np.nan
+                    tempfit[-2:] = np.nan
+                    flux_os[newy, ii] = tempfit * wmeanratio
+                    # if plots:
+                    #    plt.plot(tempalpha,tempfit*wmeanratio,'s')
+                    #    plt.show()
+
+    if writeout:
+        outname=model.meta.filename.replace('cal.fits','oversamp.fits')
+        hdu=fits.PrimaryHDU(flux_os)
+        hdu.writeto(outname, overwrite=True)
+        #pdb.set_trace()
+
+    return flux_os, x_os, y_os
+
+def drl_map(flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all):
+    # Map 1d data back to 2d
+    x2d=np.zeros([2048,2048],dtype='int')
+    x2d[y,x]=x
+    y2d=np.zeros([2048,2048],dtype='int')
+    y2d[y,x]=y
+    ra2d=np.zeros([2048,2048])*np.nan
+    ra2d[y,x]=ra
+    dec2d=np.zeros([2048,2048])*np.nan
+    dec2d[y,x]=dec
+    wave2d=np.zeros([2048,2048])*np.nan
+    wave2d[y,x]=wave_all
+    slice2d=np.zeros([2048,2048])*np.nan
+    slice2d[y,x]=slice_no_all
+    dwave2d=np.zeros([2048,2048])*np.nan
+    dwave2d[y,x]=dwave_all
+
+    cc2d0=np.zeros([2048,2048])*np.nan
+    cc2d0[y,x]=corner_coord_all[0]
+    cc2d1=np.zeros([2048,2048])*np.nan
+    cc2d1[y,x]=corner_coord_all[1]
+    cc2d2=np.zeros([2048,2048])*np.nan
+    cc2d2[y,x]=corner_coord_all[2]
+    cc2d3=np.zeros([2048,2048])*np.nan
+    cc2d3[y,x]=corner_coord_all[3]
+    cc2d4=np.zeros([2048,2048])*np.nan
+    cc2d4[y,x]=corner_coord_all[4]
+    cc2d5=np.zeros([2048,2048])*np.nan
+    cc2d5[y,x]=corner_coord_all[5]
+    cc2d6=np.zeros([2048,2048])*np.nan
+    cc2d6[y,x]=corner_coord_all[6]
+    cc2d7=np.zeros([2048,2048])*np.nan
+    cc2d7[y,x]=corner_coord_all[7]
+
+    ra_os2d=np.zeros([4096,2048])*np.nan
+    dec_os2d = np.zeros([4096, 2048]) * np.nan
+    wave_os2d = np.zeros([4096, 2048]) * np.nan
+    slice_os2d = np.zeros([4096, 2048]) * np.nan
+    dwave_os2d = np.zeros([4096, 2048]) * np.nan
+    cc_os2d0 = np.zeros([4096, 2048]) * np.nan
+    cc_os2d1 = np.zeros([4096, 2048]) * np.nan
+    cc_os2d2 = np.zeros([4096, 2048]) * np.nan
+    cc_os2d3 = np.zeros([4096, 2048]) * np.nan
+    cc_os2d4 = np.zeros([4096, 2048]) * np.nan
+    cc_os2d5 = np.zeros([4096, 2048]) * np.nan
+    cc_os2d6 = np.zeros([4096, 2048]) * np.nan
+    cc_os2d7 = np.zeros([4096, 2048]) * np.nan
+    for ii in range(0,2048):
+        if (ii % 100 == 0):
+            print('Mapping column ', ii)
+        for jj in range(0,4096):
+            ystart = int(jj/2)-2
+            ystop = int(jj/2)+2
+            if (np.nansum(ra2d[ystart:ystop,ii]) != 0):
+                ra_os2d[jj,ii] = np.interp(y_os2d[jj,ii], y2d[ystart:ystop,ii], ra2d[ystart:ystop,ii])
+                dec_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], dec2d[ystart:ystop, ii])
+                wave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], wave2d[ystart:ystop, ii])
+                slice_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], slice2d[ystart:ystop, ii])
+                dwave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], dwave2d[ystart:ystop, ii])
+                cc_os2d0[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d0[ystart:ystop, ii])
+                cc_os2d1[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d1[ystart:ystop, ii])
+                cc_os2d2[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d2[ystart:ystop, ii])
+                cc_os2d3[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d3[ystart:ystop, ii])
+                cc_os2d4[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d4[ystart:ystop, ii])
+                cc_os2d5[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d5[ystart:ystop, ii])
+                cc_os2d6[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d6[ystart:ystop, ii])
+                cc_os2d7[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d7[ystart:ystop, ii])
+
+    indx = np.where(np.isfinite(flux_os2d))
+    flux_os = flux_os2d[indx]
+    x_os = x_os2d[indx]
+    y_os = y_os2d[indx]
+    ra_os = ra_os2d[indx]
+    dec_os = dec_os2d[indx]
+    wave_os = wave_os2d[indx]
+    slice_os = slice_os2d[indx]
+    dwave_os = dwave_os2d[indx]
+    cc_os0 = cc_os2d0[indx]
+    cc_os1 = cc_os2d1[indx]
+    cc_os2 = cc_os2d2[indx]
+    cc_os3 = cc_os2d3[indx]
+    cc_os4 = cc_os2d4[indx]
+    cc_os5 = cc_os2d5[indx]
+    cc_os6 = cc_os2d6[indx]
+    cc_os7 = cc_os2d7[indx]
+    cc_os = [cc_os0, cc_os1, cc_os2, cc_os3, cc_os4, cc_os5, cc_os6, cc_os7]
+
+    pdb.set_trace()
+
+
+    return flux_os, x_os, y_os, ra_os, dec_os, wave_os, slice_os, dwave_os, cc_os
 
 
 class IFUCubeData:
@@ -1772,10 +2068,30 @@ class IFUCubeData:
         # ______________________________________________________________________________
         # The following is for both MIRI and NIRSPEC
 
-        flux_all = input_model.data[y, x]
-        err_all = input_model.err[y, x]
-        dq_all = input_model.dq[y, x]
-        valid2 = np.isfinite(flux_all)
+        # DRL: Hack in an x2 oversampling using basis splines
+        do_oversamp=True
+        if do_oversamp:
+            flux_os2d, x_os2d, y_os2d = drl_oversample(input_model, writeout=True)
+            mapresult = drl_map(flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all)
+            flux_os, x_os, y_os, ra_os, dec_os, wave_all_os, slice_no_all_os, dwave_all_os, corner_coord_all_os = mapresult
+            x=x_os
+            y=y_os
+            ra=ra_os
+            dec=dec_os
+            wave_all=wave_all_os
+            slice_no_all=slice_no_all_os
+            dwave_all=dwave_all_os
+            corner_coord_all=corner_coord_all_os
+            flux_all=flux_os
+            err_all=flux_os*0
+            dq_all=(flux_os*0).astype(int)
+            valid2=np.isfinite(flux_all)
+        else:
+            flux_all = input_model.data[y, x]
+            err_all = input_model.err[y, x]
+            dq_all = input_model.dq[y, x]
+            valid2 = np.isfinite(flux_all)
+        #pdb.set_trace()
 
         x_all = x
         y_all = y
