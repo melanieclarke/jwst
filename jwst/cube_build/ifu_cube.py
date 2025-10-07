@@ -6,6 +6,7 @@ import warnings
 
 import pdb
 import pydl.pydlutils.bspline as bs
+from scipy.signal import find_peaks
 from astropy.stats import sigma_clipped_stats as scs
 from astropy.io import fits
 
@@ -61,15 +62,18 @@ def reindex(xvec):
 
 def getweights(ratio, tempfit):
     # Weights start off proportional to flux of the model
-    weights = tempfit.copy()
-    # Identify the 7 largest weight points
-    order = np.argsort(weights)
-    indx = np.where(weights >= weights[order[-7]])
-    # Sigma-clipped mean and rms of these 7 ratios
-    mean, _, rms = scs(ratio[indx])
+    weights=tempfit.copy()
+    # Weights are zero for any pixel where the data was NaN
+    indx=np.where(~np.isfinite(ratio))
+    weights[indx]=0
+    # Identify the 5 largest weight points
+    order=np.argsort(weights)
+    indx=np.where(weights >= weights[order[-5]])
+    # Sigma-clipped mean and rms of these 5 ratios
+    mean,_,rms=scs(ratio[indx])
     # Bad if over 2 sigma away
-    bad = np.where(np.abs(mean - ratio) > 2 * rms)
-    weights[bad] = 0
+    bad=np.where(np.abs(mean-ratio) > 2*rms)
+    weights[bad]=0
 
     # Normalize weights
     weights = weights / np.nansum(weights)
@@ -79,8 +83,8 @@ def getweights(ratio, tempfit):
 def drl_oversample(model,writeout=False):
     basex, basey = np.meshgrid(np.arange(2048), np.arange(2048))
     beta_orig, alpha_orig, _ = model.meta.wcs.transform('detector', 'slicer', basex, basey)
+    alpha_orig = - alpha_orig  # Flip alpha so in same direction as increasing Y
     flux_orig = model.data
-    err_orig = model.err
 
     uqbeta = np.unique(beta_orig[np.isfinite(beta_orig)])
     # Make a slice map
@@ -89,23 +93,29 @@ def drl_oversample(model,writeout=False):
         indx = np.where(beta_orig == uqbeta[ii])
         slmap[indx] = ii
 
+    # Do some statistics on the overall cal file
+    overall_mean, _, overall_rms = scs(flux_orig)
+    # And define a threshold for brightness that we care about
+    thresh = overall_mean + 10 * overall_rms
+
     # Oversampled flux array (linear and bspline to compare)
     flux_os_linear = np.zeros([4096, 2048]) * np.nan
-    flux_os_bspline = np.zeros([4096, 2048]) * np.nan
+    flux_os_bspline_full = np.zeros([4096, 2048]) * np.nan  # Full array holding all bspline models
+    flux_os_bspline_use = np.zeros([4096, 2048]) * np.nan  # Actual array applied
     x_os = np.zeros([4096, 2048]) * np.nan
     y_os = np.zeros([4096, 2048]) * np.nan
+    alpha_os = np.zeros([4096, 2048]) * np.nan  # Note this gets reset after each slice
 
     drlstart, drlstop = 0, 2048
     pad = 2 # Padding for slope finding replacement window
 
     for slnum in range(0, 30):
         print('Oversampling slice ', slnum)
+        alpha_os[:] = np.nan
         indx = np.where(beta_orig == uqbeta[slnum])
         # Data Naned out for everything except this slice
         thisdata = np.zeros_like(flux_orig) * np.nan
         thisdata[indx] = flux_orig[indx]
-        thiserr = np.zeros_like(flux_orig) * np.nan
-        thiserr[indx] = err_orig[indx]
 
         # A running vector of x column number in float units
         runx = np.arange(2048).astype(float)
@@ -134,6 +144,18 @@ def drl_oversample(model,writeout=False):
         thisbeta = np.zeros_like(flux_orig) * np.nan
         thisbeta[indx] = beta_orig[indx]
 
+        # Define an array that will hold all alpha values for this slice where the slope can be high
+        alpha_ptsource = np.array([])
+
+        # Collapse the slice along Y to get max in each column
+        collapse = np.nanmax(thisdata, axis=0)
+        # What is the median column max across all columns?
+        medcmax = np.nanmedian(collapse)
+        # Is medcmax over threshold?  If so do bspline for this slice.
+        dospline = False
+        if (medcmax > thresh):
+            dospline = True
+
         for ii in range(drlstart, drlstop):
             # print(ii)
             # Are there sufficient values in this column to do anything?
@@ -161,10 +183,8 @@ def drl_oversample(model,writeout=False):
                 interpval[0:2] = np.nan
                 interpval[-2:] = np.nan
                 flux_os_linear[newy, ii] = interpval
-                # TODO: Don't interpolate blindly over large blocks of NAN...
 
-                # Is the peak value over 100?  If so do bspline.
-                if (np.nanmax(thisdata[:, ii]) > 100):
+                if dospline:
                     # Define a wavelength range in which to fit the bspline model as a function of alpha
                     # This is really detector X coordinate, but we'll call it l to avoid confusion elsewhere
                     lstart, lstop = ii - 50, ii + 50
@@ -187,19 +207,24 @@ def drl_oversample(model,writeout=False):
                     datatemp = datatemp[indx]
                     # Fit a bspline
                     # 30 discrete pixels across the trace, so have double this number of breakpoints
-                    sset = bspline_wrap(alphatemp, datatemp, nbkpts=60, wrapsig_low=2.5, wrapsig_high=2.5, wrapiter=10,
-                                        verbose=False)
-                    # Evaluate bspline on alphavec to get an idea of the fit
-                    datafit, _ = sset.value(alphavec)
-
+                    try:
+                        sset = bspline_wrap(alphatemp, datatemp, nbkpts=60, wrapsig_low=2.5, wrapsig_high=2.5,
+                                            wrapiter=10, verbose=False)
+                        # Evaluate bspline on alphavec to get an idea of the fit
+                        datafit, _ = sset.value(alphavec)
+                    except:
+                        print('Bspline failure in slice/ii: ', slnum, ii)
+                        continue
 
                     tempalpha = thisalpha[:, ii]
                     tempvalues = thisdata[:, ii]
-                    temperr = thiserr[:, ii]
-                    indx = np.where(np.isfinite(tempvalues) & np.isfinite(tempalpha))
+                    # Cut to only this slice, but data values here CAN have NaNs
+                    indx=np.where(np.isfinite(tempalpha))
                     tempalpha = tempalpha[indx]
                     tempvalues = tempvalues[indx]
-                    temperr = temperr[indx]
+
+                    # What is the rough native pixel size in alpha in this column?
+                    native_dalpha = np.nanmedian(np.diff(tempalpha))
 
                     # Evaluate the bspline at the alpha for input Y locations
                     tempfit, _ = sset.value(tempalpha)
@@ -211,47 +236,57 @@ def drl_oversample(model,writeout=False):
                     weights = getweights(ratio, tempfit)
                     wmeanratio = np.nansum(ratio * weights)
 
-                    # Deviation of the scaled fit from the data, divided by errors
-                    deviation = np.abs((tempvalues - tempfit * wmeanratio) / temperr)
-                    devmean, _, devstd = scs(deviation)
-                    # If mean deviation is over 5 sigma, or std dev is over 5 sigma
-                    # then something went wrong; fall back on linear interpolation
-                    failout = False
-                    #if ((devmean > 5) or (devstd > 5)):
-                    #    failout = True
-
                     # What was the slope of the model fit prior to scaling?
                     modelslope = np.abs(np.diff(tempfit, prepend=0))
+                    # Ensure boundaries don't look weird
+                    modelslope[0:2] = 0
+                    modelslope[-2:] = 0
                     # Where was the model slope greater than 0.1 in the native binning?
-                    highslope = (np.where(modelslope > 0.1))[0]
-                    findrep = np.zeros_like(tempfit)
-                    for qq in range(0, len(highslope)):
-                        replo = np.max(np.array([0, highslope[qq] - pad]))
-                        rephi = np.min(np.array([highslope[qq] + pad, len(tempfit)]))
-                        findrep[replo:rephi] = 1
-                    replace = np.where(findrep == 1)
-
-                    # If we had a failure condition, stick with the linear interpolation and do not
-                    # put the results of bspline interpolation into the output for this column
-                    if failout:
-                        continue
+                    highslope = (np.where((modelslope > 0.1)))[0]
+                    # Add to our list of alpha values where the slope can be high for this slice
+                    alpha_ptsource = np.append(alpha_ptsource, tempalpha[highslope])
 
                     # What are the alpha values over sampled points in the old frame?
                     _, tempalpha, _ = model.meta.wcs.transform('detector', 'slicer', np.repeat(ii, len(oldy)), oldy)
+                    tempalpha = -tempalpha  # Flip so increasing with increasing Y
                     # Evaluate the bspline at the alpha for these Y locations
                     tempfit, _ = sset.value(tempalpha)
                     tempfit[0:2] = np.nan
                     tempfit[-2:] = np.nan
-                    # Which pixels get replace in the oversampled coordinate system?
-                    replace_os = np.array([], dtype=int)
-                    for rval in replace:
-                        replace_os = np.append(replace_os, rval * 2)
-                        replace_os = np.append(replace_os, rval * 2 + 1)
-                    flux_os_bspline[newy[replace_os], ii] = (tempfit * wmeanratio)[replace_os]
+                    alpha_os[newy, ii] = tempalpha
+                    flux_os_bspline_full[newy, ii] = (tempfit * wmeanratio)
 
-    indx = np.where(np.isfinite(flux_os_bspline))
-    flux_os = flux_os_linear.copy()
-    flux_os[indx] = flux_os_bspline[indx]
+        # Now that our initial loop along the slice is done, we have a spline model everywhere
+        # Now look at our list of alpha values where model slopes were high to figure out
+        # where traces are and we actually want to use the spline model
+        # Don't bother with this if not enough recorded alpha values
+        if (len(alpha_ptsource) > 50):
+            avec = np.arange(60) * native_dalpha / 2 - (native_dalpha * 15)
+            hist, edges = np.histogram(alpha_ptsource, bins=60, range=(-native_dalpha * 15, native_dalpha * 15),
+                                       density=True)
+            hist = hist / np.nanmax(hist)
+            # Require peaks above some threshold
+            peak_indices, _ = find_peaks(hist, height=0.2)
+            amask = avec[peak_indices]
+            for value in amask:
+                indx = np.where((alpha_os > value - pad * native_dalpha) & (alpha_os <= value + pad * native_dalpha))
+                flux_os_bspline_use[indx] = flux_os_bspline_full[indx]
+
+    # Ensure that the simple interpolation didn't fill in any NaNs that it shouldn't
+    # (They should be interpolated either by pixel_replace or the bspline model, not this step because
+    # the simple interpolation algorithm will not be able to handle them properly)
+    # Probably a much easier way to do this...
+    nantemp = flux_os_linear.copy()
+    for qq in range(0, 2048):
+        nantemp[qq * 2, :] = model.data[qq, :]
+        nantemp[qq * 2 + 1, :] = model.data[qq, :]
+    indx = np.where(~np.isfinite(nantemp))
+    flux_os_linear[indx] = np.nan
+
+    # Insert the bspline interpolated values into the final combined oversampled array
+    indx = np.where(np.isfinite(flux_os_bspline_use))
+    flux_os = flux_os_linear.copy()  # Ensure we don't accidentally write into the linear data
+    flux_os[indx] = flux_os_bspline_use[indx]
 
     if writeout:
         outname=model.meta.filename.replace('.fits','_oversamp.fits')
@@ -260,8 +295,11 @@ def drl_oversample(model,writeout=False):
         outname=model.meta.filename.replace('.fits','_oversamp_linear.fits')
         hdu=fits.PrimaryHDU(flux_os_linear)
         hdu.writeto(outname, overwrite=True)
-        outname=model.meta.filename.replace('.fits','_oversamp_bspline.fits')
-        hdu=fits.PrimaryHDU(flux_os_bspline)
+        outname=model.meta.filename.replace('.fits','_oversamp_bspline_use.fits')
+        hdu=fits.PrimaryHDU(flux_os_bspline_use)
+        hdu.writeto(outname, overwrite=True)
+        outname = model.meta.filename.replace('.fits', '_oversamp_bspline_full.fits')
+        hdu = fits.PrimaryHDU(flux_os_bspline_full)
         hdu.writeto(outname, overwrite=True)
         #pdb.set_trace()
 
