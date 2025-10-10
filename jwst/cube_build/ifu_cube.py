@@ -66,9 +66,12 @@ def getweights(ratio, tempfit):
     # Weights are zero for any pixel where the data was NaN
     indx=np.where(~np.isfinite(ratio))
     weights[indx]=0
+    # Weights are zero for any pixel where the data or model was negative
+    indx = np.where((ratio < 0) | (tempfit < 0))
+    weights[indx] = 0
     # Identify the 5 largest weight points
     order=np.argsort(weights)
-    indx=np.where(weights >= weights[order[-5]])
+    indx=np.where((weights >= weights[order[-5]])&(np.isfinite(ratio)))
     # Sigma-clipped mean and rms of these 5 ratios
     mean,_,rms=scs(ratio[indx])
     # Bad if over 2 sigma away
@@ -97,6 +100,11 @@ def drl_oversample(model,writeout=False):
     overall_mean, _, overall_rms = scs(flux_orig)
     # And define a threshold for brightness that we care about
     thresh = overall_mean + 10 * overall_rms
+    # Also need to ensure that the median pixel value isn't negative, because that causes chaos
+    # Subtract off that constant
+    if (overall_mean < 0):
+        flux_orig = flux_orig - overall_mean
+        overall_mean = 0
 
     # Oversampled flux array (linear and bspline to compare)
     flux_os_linear = np.zeros([4096, 2048]) * np.nan
@@ -108,6 +116,9 @@ def drl_oversample(model,writeout=False):
 
     drlstart, drlstop = 0, 2048
     pad = 2 # Padding for slope finding replacement window
+    # 'data' or 'model' when putting samples together for bspline.
+    # Data can be better when ultra-bright emission lines
+    scaling = 'data'
 
     for slnum in range(0, 30):
         print('Oversampling slice ', slnum)
@@ -121,6 +132,7 @@ def drl_oversample(model,writeout=False):
         runx = np.arange(2048).astype(float)
         # A running sum in a given detector column (used for normalization)
         runsum = np.nansum(thisdata, axis=0)
+        runsum2d = np.repeat(np.reshape(runsum, [1, len(runsum)]), 2048, axis=0)
         # Traceset fit to running sum
         run_bad, run_good = np.where(runsum == 0), np.where(runsum != 0)
         runsumset = bspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2,
@@ -131,7 +143,10 @@ def drl_oversample(model,writeout=False):
         # Scaled version of the data
         # There will be places where this was bad because of bad pixels affecting the sum,
         # but since we're working over many columns the occasional bad column will just be rejected
-        thisdata_scaled = thisdata / runsummodel2d
+        if (scaling == 'data'):
+            thisdata_scaled = thisdata / runsum2d
+        else:
+            thisdata_scaled = thisdata / runsummodel2d
 
         # X and Y detector coordinates Naned out for everything except this slice
         thisx = np.zeros_like(flux_orig) * np.nan
@@ -278,8 +293,8 @@ def drl_oversample(model,writeout=False):
     # Probably a much easier way to do this...
     nantemp = flux_os_linear.copy()
     for qq in range(0, 2048):
-        nantemp[qq * 2, :] = model.data[qq, :]
-        nantemp[qq * 2 + 1, :] = model.data[qq, :]
+        nantemp[qq * 2, :] = flux_orig[qq, :]
+        nantemp[qq * 2 + 1, :] = flux_orig[qq, :]
     indx = np.where(~np.isfinite(nantemp))
     flux_os_linear[indx] = np.nan
 
