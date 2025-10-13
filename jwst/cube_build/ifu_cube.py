@@ -134,7 +134,7 @@ def getweights(ratio, tempfit):
 # 'data' can be better when bright emission lines, model can be better when outliers
 # iiplot is the X pixel to make plots at
 # bsmethod can be 'sdss' or 'scipy'
-def drl_oversample(model,writeout=False,slstart=0,slstop=30,drlstart=0,drlstop=2048,pad=2,scaling='data',iiplot=-1,bsmethod='sdss'):
+def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=2048,pad=2,scaling='data',iiplot=-1,bsmethod='sdss'):
     basex, basey = np.meshgrid(np.arange(2048), np.arange(2048))
     beta_orig, alpha_orig, _ = model.meta.wcs.transform('detector', 'slicer', basex, basey)
     alpha_orig = - alpha_orig  # Flip alpha so in same direction as increasing Y
@@ -301,14 +301,20 @@ def drl_oversample(model,writeout=False,slstart=0,slstop=30,drlstart=0,drlstop=2
                     if (ii == iiplot):
                         rc('axes', linewidth=2)
                         fig, ax = plt.subplots(1, 1, figsize=(12, 5), dpi=200)
+                        ax.tick_params(axis='both', which='major', labelsize=12)
 
                         for jj in range(lstart, lstop):
-                            plt.plot(thisalpha[:, jj], thisdata_scaled[:, jj], 'x')
+                            plt.plot(thisalpha[:, jj], thisdata_scaled[:, jj], '.', ms=10, color='black')
+                        plt.plot(thisalpha[:, lstart], thisdata_scaled[:, lstart], '.', ms=10, color='black',label='Samples')
                         # And the data values in the first column
-                        plt.plot(thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=15)
-                        plt.plot(alphavec, datafit, linewidth=3)
-                        plt.title(str(ii))
+                        plt.plot(thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=15, color='tab:green', label='Column data')
+                        prange=np.where((alphavec > np.nanmin(thisalpha[:,ii]))&(alphavec < np.nanmax(thisalpha[:,ii])))
+                        plt.plot(alphavec[prange], datafit[prange], linewidth=3,label='Bspline Fit',color='tab:orange')
+                        plt.xlabel(r'Along-slice coordinate (meters)',fontsize=14)
+                        plt.ylabel('Scaled Intensity',fontsize=14)
                         plt.grid()
+                        plt.legend(fontsize=14)
+                        plt.tight_layout()
                         plt.show()
 
                     tempalpha = thisalpha[:, ii]
@@ -333,6 +339,7 @@ def drl_oversample(model,writeout=False,slstart=0,slstop=30,drlstart=0,drlstop=2
                     # Weights start off proportional to flux
                     weights = getweights(ratio, tempfit)
                     wmeanratio = np.nansum(ratio * weights)
+                    #pdb.set_trace()
 
                     # What was the slope of the model fit prior to scaling?
                     modelslope = np.abs(np.diff(tempfit, prepend=0))
@@ -387,10 +394,18 @@ def drl_oversample(model,writeout=False,slstart=0,slstop=30,drlstart=0,drlstop=2
                     flux_os_bspline_full[newy, ii] = (tempfit * wmeanratio)
 
                     if (ii == iiplot):
-                        plt.plot(newy, flux_os_linear[newy, ii], 's', label='Linear Interp')
-                        plt.plot(newy, flux_os_bspline_full[newy, ii], 'd', label='Spline Interp')
-                        plt.legend()
-                        plt.title('Resampled')
+                        rc('axes', linewidth=2)
+                        fig, ax = plt.subplots(1, 1, figsize=(12, 5), dpi=200)
+                        ax.tick_params(axis='both', which='major', labelsize=12)
+                        plt.plot(newy, flux_os_linear[newy, ii], 's', ms=10, mfc='None', color='tab:blue', label='Linear Interpolation')
+                        plt.plot(newy, flux_os_linear[newy, ii], linewidth=3, color='tab:blue')
+                        plt.plot(newy, flux_os_bspline_full[newy, ii], 'd', ms=10, mfc='None', color='tab:orange', label='Spline Interpolation')
+                        plt.plot(newy, flux_os_bspline_full[newy, ii], linewidth=3, color='tab:orange')
+                        plt.xlabel(r'Resampled Row (pixels)', fontsize=14)
+                        plt.ylabel('Resampled Intensity', fontsize=14)
+                        plt.grid()
+                        plt.legend(fontsize=14)
+                        plt.tight_layout()
                         plt.show()
 
         # Now that our initial loop along the slice is done, we have a spline model everywhere
@@ -408,6 +423,7 @@ def drl_oversample(model,writeout=False,slstart=0,slstop=30,drlstart=0,drlstop=2
             for value in amask:
                 indx = np.where((alpha_os > value - pad * native_dalpha) & (alpha_os <= value + pad * native_dalpha))
                 flux_os_bspline_use[indx] = flux_os_bspline_full[indx]
+            #pdb.set_trace()
             #plt.plot(avec, hist)
             #plt.show()
 
