@@ -3,9 +3,13 @@
 import logging
 import math
 import warnings
-
+import matplotlib.pyplot as plt
+from matplotlib import rc
 import pdb
 import pydl.pydlutils.bspline as bs
+from astropy.modeling.models import Spline1D
+from astropy.modeling.fitting import SplineExactKnotsFitter
+
 from scipy.signal import find_peaks
 from astropy.stats import sigma_clipped_stats as scs
 from astropy.io import fits
@@ -31,6 +35,44 @@ log = logging.getLogger(__name__)
 
 __all__ = ["IFUCubeData", "IncorrectInputError", "IncorrectParameterError"]
 
+# This version uses only astropy/scipy but is roughly 3x slower
+def newbspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, verbose=False):
+    xvec_use = xvec.copy()
+    yvec_use = yvec.copy()
+    indx = np.where((np.isfinite(xvec_use)) & (np.isfinite(yvec_use)))
+    xvec_use = xvec_use[indx]
+    yvec_use = yvec_use[indx]
+
+    knotspacing = (np.max(xvec_use) - np.min(xvec_use)) / nbkpts
+    knotmin = np.min(xvec_use) + knotspacing / 2.
+    knotmax = np.max(xvec_use) - knotspacing / 2.
+
+    # knots=np.arange(np.min(xvec_use),np.max(xvec_use),(np.max(xvec_use)-np.min(xvec_use))/nbkpts)
+    # knots=np.arange(-0.006,0.006,0.0002)
+    knots = np.arange(knotmin, knotmax, knotspacing)
+    #print(knots)
+    spl = Spline1D()
+    fitter = SplineExactKnotsFitter()
+
+    for ii in range(0, wrapiter):
+        #print('ii = ', ii)
+        spl1 = fitter(spl, xvec_use, yvec_use, t=knots)
+        ytemp = spl1(xvec_use)
+        diff = yvec_use - ytemp
+        rms = np.nanstd(diff)
+        rej = np.where((diff < -wrapsig_low * rms) | (diff > wrapsig_high * rms))
+        keep = np.where((diff >= -wrapsig_low * rms) & (diff <= wrapsig_high * rms))
+        if verbose:
+            print('Rejected', len(rej[0]), 'Kept', len(keep[0]))
+        xvec_use = xvec_use[keep]
+        yvec_use = yvec_use[keep]
+        # If no points rejected break out of the loop
+        if (len(rej[0]) == 0):
+            break
+
+    return spl1
+
+
 # Bspline iteration doesn't seem to be working, write my own in a wrapper
 def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, verbose=False):
     xvec_use = xvec.copy()
@@ -48,6 +90,8 @@ def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=
             print('Rejected', len(rej[0]), 'Kept', len(keep[0]))
         xvec_use = xvec_use[keep]
         yvec_use = yvec_use[keep]
+        if (len(rej[0]) == 0):
+            break
 
     return sset
 
@@ -83,7 +127,14 @@ def getweights(ratio, tempfit):
 
     return weights
 
-def drl_oversample(model,writeout=False):
+# slstart/stop is the slices to work on
+# drlstart/stop is the x pixels to work on
+# pad is the padding for the replacement window
+# scaling can be 'data' or 'model' when putting samples together for bspline.
+# 'data' can be better when bright emission lines, model can be better when outliers
+# iiplot is the X pixel to make plots at
+# bsmethod can be 'sdss' or 'scipy'
+def drl_oversample(model,writeout=False,slstart=0,slstop=30,drlstart=0,drlstop=2048,pad=2,scaling='data',iiplot=-1,bsmethod='sdss'):
     basex, basey = np.meshgrid(np.arange(2048), np.arange(2048))
     beta_orig, alpha_orig, _ = model.meta.wcs.transform('detector', 'slicer', basex, basey)
     alpha_orig = - alpha_orig  # Flip alpha so in same direction as increasing Y
@@ -114,13 +165,7 @@ def drl_oversample(model,writeout=False):
     y_os = np.zeros([4096, 2048]) * np.nan
     alpha_os = np.zeros([4096, 2048]) * np.nan  # Note this gets reset after each slice
 
-    drlstart, drlstop = 0, 2048
-    pad = 2 # Padding for slope finding replacement window
-    # 'data' or 'model' when putting samples together for bspline.
-    # Data can be better when ultra-bright emission lines
-    scaling = 'data'
-
-    for slnum in range(0, 30):
+    for slnum in range(slstart, slstop):
         print('Oversampling slice ', slnum)
         alpha_os[:] = np.nan
         indx = np.where(beta_orig == uqbeta[slnum])
@@ -135,9 +180,12 @@ def drl_oversample(model,writeout=False):
         runsum2d = np.repeat(np.reshape(runsum, [1, len(runsum)]), 2048, axis=0)
         # Traceset fit to running sum
         run_bad, run_good = np.where(runsum == 0), np.where(runsum != 0)
-        runsumset = bspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2,
-                                 wrapsig_high=2, wrapiter=10, verbose=False)
-        runsummodel, _ = runsumset.value(runx)
+        if (bsmethod == 'sdss'):
+            runsumset = bspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2, wrapsig_high=2, wrapiter=10, verbose=False)
+            runsummodel, _ = runsumset.value(runx)
+        else:
+            runsumspl = newbspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2, wrapsig_high=2, wrapiter=10, verbose=False)
+            runsummodel = runsumspl(runx)
         runsummodel[run_bad] = np.nan
         runsummodel2d = np.repeat(np.reshape(runsummodel, [1, len(runsummodel)]), 2048, axis=0)
         # Scaled version of the data
@@ -203,6 +251,19 @@ def drl_oversample(model,writeout=False):
                     # Define a wavelength range in which to fit the bspline model as a function of alpha
                     # This is really detector X coordinate, but we'll call it l to avoid confusion elsewhere
                     lstart, lstop = ii - 50, ii + 50
+
+                    # Plot the fit to the runsum vector
+                    if (ii == iiplot):
+                        plt.plot(runx, runsum, zorder=0, label='data')
+                        plt.plot(runx, runsummodel, label='model')
+                        plt.xlim(lstart, lstop)
+                        plt.xlabel('X column')
+                        plt.ylabel('Runsum')
+                        plt.title(str(ii))
+                        plt.legend()
+                        plt.show()
+
+
                     # Deal with detector edges
                     lstart = np.max(np.array([lstart, 0]))
                     lstop = np.min(np.array([lstop, 2048]))
@@ -223,13 +284,32 @@ def drl_oversample(model,writeout=False):
                     # Fit a bspline
                     # 30 discrete pixels across the trace, so have double this number of breakpoints
                     try:
-                        sset = bspline_wrap(alphatemp, datatemp, nbkpts=60, wrapsig_low=2.5, wrapsig_high=2.5,
-                                            wrapiter=10, verbose=False)
-                        # Evaluate bspline on alphavec to get an idea of the fit
-                        datafit, _ = sset.value(alphavec)
+                        if (bsmethod == 'sdss'):
+                            sset = bspline_wrap(alphatemp, datatemp, nbkpts=60, wrapsig_low=2.5, wrapsig_high=2.5, wrapiter=10, verbose=False)
+                            # Evaluate bspline on alphavec to get an idea of the fit
+                            datafit, _ = sset.value(alphavec)
+                        else:
+                            spl = newbspline_wrap(alphatemp,datatemp,nbkpts=60, wrapsig_low=2.5, wrapsig_high=2.5, wrapiter=10, verbose= False)
+                            datafit = spl(alphavec)
                     except:
                         print('Bspline failure in slice/ii: ', slnum, ii)
                         continue
+
+                    #pdb.set_trace()
+
+                    # Plot the spline model
+                    if (ii == iiplot):
+                        rc('axes', linewidth=2)
+                        fig, ax = plt.subplots(1, 1, figsize=(12, 5), dpi=200)
+
+                        for jj in range(lstart, lstop):
+                            plt.plot(thisalpha[:, jj], thisdata_scaled[:, jj], 'x')
+                        # And the data values in the first column
+                        plt.plot(thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=15)
+                        plt.plot(alphavec, datafit, linewidth=3)
+                        plt.title(str(ii))
+                        plt.grid()
+                        plt.show()
 
                     tempalpha = thisalpha[:, ii]
                     tempvalues = thisdata[:, ii]
@@ -242,7 +322,10 @@ def drl_oversample(model,writeout=False):
                     native_dalpha = np.nanmedian(np.diff(tempalpha))
 
                     # Evaluate the bspline at the alpha for input Y locations
-                    tempfit, _ = sset.value(tempalpha)
+                    if (bsmethod == 'sdss'):
+                        tempfit, _ = sset.value(tempalpha)
+                    else:
+                        tempfit = spl(tempalpha)
                     # Determine the normalization by the weighted mean ratio between model and data
                     # Weights are based on the model so that we can reject outliers
                     ratio = tempvalues / tempfit
@@ -261,15 +344,54 @@ def drl_oversample(model,writeout=False):
                     # Add to our list of alpha values where the slope can be high for this slice
                     alpha_ptsource = np.append(alpha_ptsource, tempalpha[highslope])
 
+                    if (ii == iiplot):
+                        # Plot derivative of the model fit
+                        plt.plot(tempalpha, modelslope, 'x', label='Slope')
+                        plt.plot(tempalpha[highslope], modelslope[highslope], 'x', label='High Value')
+                        plt.legend()
+                        plt.grid()
+                        plt.xlabel('alpha')
+                        plt.ylabel('Model Slope')
+                        plt.show()
+                        plt.plot(tempalpha, weights, 's')
+                        plt.xlabel('Alpha')
+                        plt.ylabel('Weights')
+                        plt.grid()
+                        plt.title(str(ii))
+                        plt.show()
+                        plt.plot(tempalpha, ratio, 's')
+                        plt.xlabel('Alpha')
+                        plt.ylabel('Ratio')
+                        plt.grid()
+                        plt.title(str(ii))
+                        plt.show()
+                        plt.plot(tempalpha, tempvalues, 'x', label='orig')
+                        plt.plot(tempalpha, tempfit * wmeanratio, 's', label='fit', zorder=0)
+                        plt.xlabel('alpha')
+                        plt.ylabel('Scaled flux')
+                        plt.legend()
+                        plt.title(str(ii))
+                        plt.show()
+
                     # What are the alpha values over sampled points in the old frame?
                     _, tempalpha, _ = model.meta.wcs.transform('detector', 'slicer', np.repeat(ii, len(oldy)), oldy)
                     tempalpha = -tempalpha  # Flip so increasing with increasing Y
                     # Evaluate the bspline at the alpha for these Y locations
-                    tempfit, _ = sset.value(tempalpha)
+                    if (bsmethod == 'sdss'):
+                        tempfit, _ = sset.value(tempalpha)
+                    else:
+                        tempfit = spl(tempalpha)
                     tempfit[0:2] = np.nan
                     tempfit[-2:] = np.nan
                     alpha_os[newy, ii] = tempalpha
                     flux_os_bspline_full[newy, ii] = (tempfit * wmeanratio)
+
+                    if (ii == iiplot):
+                        plt.plot(newy, flux_os_linear[newy, ii], 's', label='Linear Interp')
+                        plt.plot(newy, flux_os_bspline_full[newy, ii], 'd', label='Spline Interp')
+                        plt.legend()
+                        plt.title('Resampled')
+                        plt.show()
 
         # Now that our initial loop along the slice is done, we have a spline model everywhere
         # Now look at our list of alpha values where model slopes were high to figure out
@@ -286,6 +408,8 @@ def drl_oversample(model,writeout=False):
             for value in amask:
                 indx = np.where((alpha_os > value - pad * native_dalpha) & (alpha_os <= value + pad * native_dalpha))
                 flux_os_bspline_use[indx] = flux_os_bspline_full[indx]
+            #plt.plot(avec, hist)
+            #plt.show()
 
     # Ensure that the simple interpolation didn't fill in any NaNs that it shouldn't
     # (They should be interpolated either by pixel_replace or the bspline model, not this step because
@@ -1006,7 +1130,7 @@ class IFUCubeData:
                 log.info(f"Cube covers grating, filter: {this_gwa}, {this_fwa}")
 
     # ________________________________________________________________________________
-    def build_ifucube(self):
+    def build_ifucube(self,oversample=False):
         """
         Create an IFU cube.
 
@@ -1079,7 +1203,7 @@ class IFUCubeData:
                 log.debug(f"Working on Band defined by: {this_par1} {this_par2}")
 
                 if self.interpolation in ["pointcloud", "drizzle"]:
-                    pixelresult = self.map_detector_to_outputframe(this_par1, input_model)
+                    pixelresult = self.map_detector_to_outputframe(this_par1, input_model, oversample)
 
                     (
                         coord1,
@@ -2081,7 +2205,7 @@ class IFUCubeData:
         self.print_cube_geometry()
 
     # ________________________________________________________________________________
-    def map_detector_to_outputframe(self, this_par1, input_model):
+    def map_detector_to_outputframe(self, this_par1, input_model, oversample=False):
         """
         Loop over a file and map the detector pixels to the output cube.
 
@@ -2160,8 +2284,8 @@ class IFUCubeData:
         # The following is for both MIRI and NIRSPEC
 
         # DRL: Hack in an x2 oversampling using basis splines
-        do_oversamp=True
-        if do_oversamp:
+        #pdb.set_trace()
+        if oversample:
             flux_os2d, x_os2d, y_os2d = drl_oversample(input_model, writeout=True)
             mapresult = drl_map(flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all)
             flux_os, x_os, y_os, ra_os, dec_os, wave_all_os, slice_no_all_os, dwave_all_os, corner_coord_all_os = mapresult

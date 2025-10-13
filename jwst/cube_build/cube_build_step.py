@@ -1,7 +1,7 @@
 import logging
 import time
 from pathlib import Path
-
+import pdb
 import asdf
 from astropy import units
 
@@ -50,6 +50,7 @@ class CubeBuildStep(Step):
          suffix = string(default='s3d')
          offset_file = string(default=None) # Filename containing a list of Ra and Dec offsets to apply to files.
          debug_spaxel = string(default='-1 -1 -1') # Default not used
+         oversample = boolean(default=false) # Oversample the data
        """  # noqa: E501
 
     reference_file_types = ["cubepar"]
@@ -267,6 +268,7 @@ class CubeBuildStep(Step):
             offsets = self.check_offset_file()
             if offsets is not None:
                 self.offsets = offsets
+
         # ________________________________________________________________________________
         # Read in Cube Parameter Reference file
         # identify what reference file has been associated with these input
@@ -414,7 +416,7 @@ class CubeBuildStep(Step):
             # Else standard IFU cube building
             # the result returned from build_ifucube will be 1 IFU CUBE
             else:
-                result, status = thiscube.build_ifucube()
+                result, status = thiscube.build_ifucube(self.oversample)
 
                 # check if cube_build failed
                 # **************************
