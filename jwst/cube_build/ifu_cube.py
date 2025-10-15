@@ -36,7 +36,8 @@ log = logging.getLogger(__name__)
 __all__ = ["IFUCubeData", "IncorrectInputError", "IncorrectParameterError"]
 
 # This version uses only astropy/scipy but is roughly 3x slower
-def newbspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, verbose=False):
+# It has also not been optimized for science as well as bspline_wrap
+def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, verbose=False):
     xvec_use = xvec.copy()
     yvec_use = yvec.copy()
     indx = np.where((np.isfinite(xvec_use)) & (np.isfinite(yvec_use)))
@@ -72,15 +73,42 @@ def newbspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapit
 
     return spl1
 
-
-# Bspline iteration doesn't seem to be working, write my own in a wrapper
 def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, verbose=False):
     xvec_use = xvec.copy()
     yvec_use = yvec.copy()
     sset = 0
+    indx = np.where((np.isfinite(xvec_use)) & (np.isfinite(yvec_use)))
+    xvec_use = xvec_use[indx]
+    yvec_use = yvec_use[indx]
+
+    # Typical spacing between input points
+    spacing=np.abs(np.diff(xvec_use,prepend=0))
+    space_mean,_,space_rms=scs(spacing)
+    if (space_rms > 0):
+        good=np.where(spacing < space_mean + 5*space_rms)
+        # Reject points with abnormally large spacing as they can cause problems with breakpoints
+        xvec_use=xvec_use[good]
+        yvec_use=yvec_use[good]
+
+    # Look for failure cases where the gaps between input points are too large (e.g., trace is too flat on the
+    # detector)
+    # What is the tenth-largest spacing?
+    knotspacing = (np.max(xvec_use) - np.min(xvec_use)) / nbkpts
+    tenthspace = np.partition(spacing, -10)[-10]
+    #print(tenthspace/knotspacing)
+    # If the tenth-largest spacing was bigger than the knot spacing (with some margin) then don't bspline
+    # This factor of 1.81 was dialed based on inspection of the results as sampling gets progressively worse
+    # for NIRSpec detectors
+    if (tenthspace > 1.6 * knotspacing):
+        return 0
 
     for ii in range(0, wrapiter):
-        sset, _ = bs.iterfit(xvec_use, yvec_use, nbkpts=nbkpts)
+        knotspacing = (np.max(xvec_use) - np.min(xvec_use)) / nbkpts
+        knotmin = np.min(xvec_use) + knotspacing / 2.
+        knotmax = np.max(xvec_use) - knotspacing / 2.
+        knots = np.arange(knotmin, knotmax, knotspacing)
+
+        sset, _ = bs.iterfit(xvec_use, yvec_use, bkpt=knots)
         ytemp, _ = sset.value(xvec_use)
         diff = yvec_use - ytemp
         rms = np.nanstd(diff)
@@ -128,17 +156,17 @@ def getweights(ratio, tempfit):
     return weights
 
 # slstart/stop is the slices to work on
-# drlstart/stop is the x pixels to work on
 # pad is the padding for the replacement window
 # scaling can be 'data' or 'model' when putting samples together for bspline.
 # 'data' can be better when bright emission lines, model can be better when outliers
 # iiplot is the X pixel to make plots at
 # bsmethod can be 'sdss' or 'scipy'
-def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=2048,pad=2,scaling='data',iiplot=-1,bsmethod='sdss'):
+def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0.1, threshsig=10, lrange=50, scaling='data',iiplot=-771, bsmethod='sdss'):
     basex, basey = np.meshgrid(np.arange(2048), np.arange(2048))
     beta_orig, alpha_orig, _ = model.meta.wcs.transform('detector', 'slicer', basex, basey)
     alpha_orig = - alpha_orig  # Flip alpha so in same direction as increasing Y
     flux_orig = model.data
+    #print(iiplot)
 
     uqbeta = np.unique(beta_orig[np.isfinite(beta_orig)])
     # Make a slice map
@@ -150,7 +178,7 @@ def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=20
     # Do some statistics on the overall cal file
     overall_mean, _, overall_rms = scs(flux_orig)
     # And define a threshold for brightness that we care about
-    thresh = overall_mean + 10 * overall_rms
+    thresh = overall_mean + threshsig * overall_rms
     # Also need to ensure that the median pixel value isn't negative, because that causes chaos
     # Subtract off that constant
     if (overall_mean < 0):
@@ -173,6 +201,9 @@ def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=20
         thisdata = np.zeros_like(flux_orig) * np.nan
         thisdata[indx] = flux_orig[indx]
 
+        # Define a default spline traceset, initialize to zero for this slice
+        sset_save = 0
+
         # A running vector of x column number in float units
         runx = np.arange(2048).astype(float)
         # A running sum in a given detector column (used for normalization)
@@ -184,7 +215,7 @@ def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=20
             runsumset = bspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2, wrapsig_high=2, wrapiter=10, verbose=False)
             runsummodel, _ = runsumset.value(runx)
         else:
-            runsumspl = newbspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2, wrapsig_high=2, wrapiter=10, verbose=False)
+            runsumspl = scipybspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2, wrapsig_high=2, wrapiter=10, verbose=False)
             runsummodel = runsumspl(runx)
         runsummodel[run_bad] = np.nan
         runsummodel2d = np.repeat(np.reshape(runsummodel, [1, len(runsummodel)]), 2048, axis=0)
@@ -211,7 +242,9 @@ def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=20
         alpha_ptsource = np.array([])
 
         # Collapse the slice along Y to get max in each column
-        collapse = np.nanmax(thisdata, axis=0)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(action="ignore", category=RuntimeWarning)
+            collapse = np.nanmax(thisdata, axis=0)
         # What is the median column max across all columns?
         medcmax = np.nanmedian(collapse)
         # Is medcmax over threshold?  If so do bspline for this slice.
@@ -219,8 +252,17 @@ def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=20
         if (medcmax > thresh):
             dospline = True
 
-        for ii in range(drlstart, drlstop):
-            # print(ii)
+        # For NRS1, start on the left of detector since the tilt wrt pixels is greatest here
+        if (model.meta.instrument.detector == 'NRS1'):
+            drlstart, drlstop, drlstep = 0, 2048, 1
+        # For NRS2, start on the right of detector since the tilt wrt pixels is greatest here
+        elif (model.meta.instrument.detector == 'NRS2'):
+            drlstart, drlstop, drlstep = 2047, 0, -1
+        else:
+            print('ERROR: Unknown detector')
+
+        for ii in range(drlstart, drlstop, drlstep):
+            #print(ii)
             # Are there sufficient values in this column to do anything?
             temp = thisdata[:, ii].copy()
             temp = temp[np.isfinite(temp)]
@@ -250,7 +292,7 @@ def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=20
                 if dospline:
                     # Define a wavelength range in which to fit the bspline model as a function of alpha
                     # This is really detector X coordinate, but we'll call it l to avoid confusion elsewhere
-                    lstart, lstop = ii - 50, ii + 50
+                    lstart, lstop = ii - lrange, ii + lrange
 
                     # Plot the fit to the runsum vector
                     if (ii == iiplot):
@@ -283,22 +325,30 @@ def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=20
                     datatemp = datatemp[indx]
                     # Fit a bspline
                     # 30 discrete pixels across the trace, so have double this number of breakpoints
-                    try:
-                        if (bsmethod == 'sdss'):
-                            sset = bspline_wrap(alphatemp, datatemp, nbkpts=60, wrapsig_low=2.5, wrapsig_high=2.5, wrapiter=10, verbose=False)
-                            # Evaluate bspline on alphavec to get an idea of the fit
+                    #if (ii == iiplot):
+                    #    pdb.set_trace()
+                    if (bsmethod == 'sdss'):
+                        try:
+                            sset = bspline_wrap(alphatemp, datatemp, nbkpts=62, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, verbose=False)
+                            # If this routine could not get a fit (returned zero) use the saved fit
+                            if (sset == 0):
+                                sset = sset_save
+                            else:
+                                #print('Saved sset from column ',ii)
+                                sset_save = sset
                             datafit, _ = sset.value(alphavec)
-                        else:
-                            spl = newbspline_wrap(alphatemp,datatemp,nbkpts=60, wrapsig_low=2.5, wrapsig_high=2.5, wrapiter=10, verbose= False)
-                            datafit = spl(alphavec)
-                    except:
-                        print('Bspline failure in slice/ii: ', slnum, ii)
-                        continue
-
-                    #pdb.set_trace()
+                        except:
+                            # If we had some kind of exception, just used the saved spline fit
+                            print('Bspline fail- using previous model')
+                            sset = sset_save
+                            datafit, _ = sset.value(alphavec)
+                    else:
+                        spl = scipybspline_wrap(alphatemp, datatemp, nbkpts=62, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, verbose=False)
+                        datafit = spl(alphavec)
 
                     # Plot the spline model
                     if (ii == iiplot):
+                    #if (ii % 10 == 0):
                         rc('axes', linewidth=2)
                         fig, ax = plt.subplots(1, 1, figsize=(12, 5), dpi=200)
                         ax.tick_params(axis='both', which='major', labelsize=12)
@@ -310,12 +360,14 @@ def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=20
                         plt.plot(thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=15, color='tab:green', label='Column data')
                         prange=np.where((alphavec > np.nanmin(thisalpha[:,ii]))&(alphavec < np.nanmax(thisalpha[:,ii])))
                         plt.plot(alphavec[prange], datafit[prange], linewidth=3,label='Bspline Fit',color='tab:orange')
+                        plt.title('Column '+str(ii))
                         plt.xlabel(r'Along-slice coordinate (meters)',fontsize=14)
                         plt.ylabel('Scaled Intensity',fontsize=14)
                         plt.grid()
                         plt.legend(fontsize=14)
                         plt.tight_layout()
                         plt.show()
+                        #pdb.set_trace()
 
                     tempalpha = thisalpha[:, ii]
                     tempvalues = thisdata[:, ii]
@@ -347,7 +399,7 @@ def drl_oversample(model,writeout=True,slstart=0,slstop=30,drlstart=0,drlstop=20
                     modelslope[0:2] = 0
                     modelslope[-2:] = 0
                     # Where was the model slope greater than 0.1 in the native binning?
-                    highslope = (np.where((modelslope > 0.1)))[0]
+                    highslope = (np.where((modelslope > slopelim)))[0]
                     # Add to our list of alpha values where the slope can be high for this slice
                     alpha_ptsource = np.append(alpha_ptsource, tempalpha[highslope])
 
