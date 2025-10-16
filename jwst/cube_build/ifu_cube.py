@@ -350,22 +350,24 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                     if (ii == iiplot):
                     #if (ii % 10 == 0):
                         rc('axes', linewidth=2)
-                        fig, ax = plt.subplots(1, 1, figsize=(12, 5), dpi=200)
+                        fig, ax = plt.subplots(1, 1, figsize=(6, 5), dpi=150)
                         ax.tick_params(axis='both', which='major', labelsize=12)
 
                         for jj in range(lstart, lstop):
-                            plt.plot(thisalpha[:, jj], thisdata_scaled[:, jj], '.', ms=10, color='black')
+                            plt.plot(thisalpha[:, jj], thisdata_scaled[:, jj], '.', ms=12, color='black')
                         plt.plot(thisalpha[:, lstart], thisdata_scaled[:, lstart], '.', ms=10, color='black',label='Samples')
                         # And the data values in the first column
-                        plt.plot(thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=15, color='tab:green', label='Column data')
+                        plt.plot(thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=10, color='tab:green', label='Column data')
                         prange=np.where((alphavec > np.nanmin(thisalpha[:,ii]))&(alphavec < np.nanmax(thisalpha[:,ii])))
-                        plt.plot(alphavec[prange], datafit[prange], linewidth=3,label='Bspline Fit',color='tab:orange')
-                        plt.title('Column '+str(ii))
+                        plt.plot(alphavec[prange], datafit[prange], linewidth=2,label='Bspline Fit',color='tab:orange')
+                        #plt.title('Column '+str(ii))
                         plt.xlabel(r'Along-slice coordinate (meters)',fontsize=14)
                         plt.ylabel('Scaled Intensity',fontsize=14)
                         plt.grid()
                         plt.legend(fontsize=14)
+                        plt.ylim(-0.05,1.2*np.nanmax(datafit[prange]))
                         plt.tight_layout()
+                        plt.savefig('temp.pdf')
                         plt.show()
                         #pdb.set_trace()
 
