@@ -73,7 +73,7 @@ def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrap
 
     return spl1
 
-def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, verbose=False):
+def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, spaceratio=1.6, verbose=False):
     xvec_use = xvec.copy()
     yvec_use = yvec.copy()
     sset = 0
@@ -97,9 +97,9 @@ def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=
     tenthspace = np.partition(spacing, -10)[-10]
     #print(tenthspace/knotspacing)
     # If the tenth-largest spacing was bigger than the knot spacing (with some margin) then don't bspline
-    # This factor of 1.81 was dialed based on inspection of the results as sampling gets progressively worse
+    # This factor of 1.6 was dialed based on inspection of the results as sampling gets progressively worse
     # for NIRSpec detectors
-    if (tenthspace > 1.6 * knotspacing):
+    if (tenthspace > spaceratio * knotspacing):
         return 0
 
     for ii in range(0, wrapiter):
@@ -162,41 +162,105 @@ def getweights(ratio, tempfit):
 # iiplot is the X pixel to make plots at
 # bsmethod can be 'sdss' or 'scipy'
 def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0.1, threshsig=10, lrange=50, scaling='data',iiplot=-771, bsmethod='sdss'):
-    basex, basey = np.meshgrid(np.arange(2048), np.arange(2048))
-    beta_orig, alpha_orig, _ = model.meta.wcs.transform('detector', 'slicer', basex, basey)
-    alpha_orig = - alpha_orig  # Flip alpha so in same direction as increasing Y
-    flux_orig = model.data
+    detector=model.meta.instrument.detector
+    if ((detector == 'NRS1')|(detector == 'NRS2')):
+        mode='NIRS'
+        xsize, ysize = 2048, 2048
+        xosize, yosize = xsize, ysize*2
+        require_ngood = 15
+        splinebkpt = 62
+        spaceratio=1.6
+    elif ((detector == 'MIRIFUSHORT')|(detector == 'MIRIFULONG')):
+        mode='MIRI'
+        # Note that MIRI gets rotated internally, so these are FLIPPED from usual orientation
+        xsize, ysize = 1024, 1032
+        xosize, yosize = xsize, ysize*2
+        require_ngood = 10
+        splinebkpt = 36
+        spaceratio=1.2
+    else:
+        print('Unknown detector')
+        return
+
+    # Define MIRI detector-specific column splitting the two wavelength channels
+    if (detector == 'MIRIFUSHORT'):
+        chsplit = 509
+    elif (detector == 'MIRIFULONG'):
+        chsplit = 489
+    else:
+        chsplit=np.nan
+
+    basex, basey = np.meshgrid(np.arange(xsize), np.arange(ysize))
+    if (mode == 'NIRS'):
+        beta_orig, alpha_orig, _ = model.meta.wcs.transform('detector', 'slicer', basex, basey)
+        alpha_orig = - alpha_orig  # Flip alpha so in same direction as increasing Y
+        # NIRSpec can sort just by ordering slices by beta
+        uqbeta = np.unique(beta_orig[np.isfinite(beta_orig)])
+        # NIRSpec uses fluxes in normal orientation
+        flux_orig = model.data
+    else:
+        alpha_orig, beta_orig, _ = model.meta.wcs.transform('detector', 'alpha_beta', np.rot90(basey,k=1), np.rot90(basex,k=-1))
+        # MIRI needs a more difficult way of sorting slices left to right respecting channel boundary
+        uqbeta = []
+        btemp = beta_orig[500,:]
+        btemp=btemp[np.isfinite(btemp)]
+        for tt in range(0,len(btemp)):
+            if (not (btemp[tt] in uqbeta)):
+                uqbeta = np.append(uqbeta, btemp[tt])
+        uqbeta = np.array(uqbeta)
+        # MIRI will rotate all arrays for convenience to line up with NIRSpec convention
+        flux_orig = np.rot90(model.data)
+        alpha_orig = np.rot90(alpha_orig)
+        beta_orig = np.rot90(beta_orig)
     #print(iiplot)
 
-    uqbeta = np.unique(beta_orig[np.isfinite(beta_orig)])
     # Make a slice map
     slmap = np.zeros_like(basex) * np.nan
     for ii in range(0, len(uqbeta)):
         indx = np.where(beta_orig == uqbeta[ii])
         slmap[indx] = ii
 
+    # Set thresholding for the bspline fitting
     # Do some statistics on the overall cal file
     overall_mean, _, overall_rms = scs(flux_orig)
-    # And define a threshold for brightness that we care about
-    thresh = overall_mean + threshsig * overall_rms
-    # Also need to ensure that the median pixel value isn't negative, because that causes chaos
+    # Need to ensure that the median pixel value isn't negative, because that causes chaos
     # Subtract off that constant
     if (overall_mean < 0):
         flux_orig = flux_orig - overall_mean
         overall_mean = 0
+    # Define a per-slice analysis threshold (must be brighter than some level above background)
+    thresh=np.zeros(len(uqbeta))*np.nan
+    # For NIRSpec all slices have the same threshold
+    if (mode == 'NIRS'):
+        thresh[:] = overall_mean + threshsig * overall_rms
+    # For MIRI we need each channel to have its own threshold, particularly for Ch3/Ch4
+    # since the sky is so much brighter in Ch4
+    else:
+        # Ch1/4
+        ch_mean, _, ch_rms = scs(flux_orig[chsplit:,:])
+        slnum_in_ch=np.unique(slmap[chsplit:,:])
+        for ii in range(0, len(uqbeta)):
+            if (ii in slnum_in_ch):
+                thresh[ii]=ch_mean + threshsig * ch_rms
+        # Ch2/3
+        ch_mean, _, ch_rms = scs(flux_orig[0:chsplit,:])
+        slnum_in_ch=np.unique(slmap[0:chsplit,:])
+        for ii in range(0, len(uqbeta)):
+            if (ii in slnum_in_ch):
+                thresh[ii]=ch_mean + threshsig * ch_rms
 
     # Oversampled flux array (linear and bspline to compare)
-    flux_os_linear = np.zeros([4096, 2048]) * np.nan
-    flux_os_bspline_full = np.zeros([4096, 2048]) * np.nan  # Full array holding all bspline models
-    flux_os_bspline_use = np.zeros([4096, 2048]) * np.nan  # Actual array applied
-    x_os = np.zeros([4096, 2048]) * np.nan
-    y_os = np.zeros([4096, 2048]) * np.nan
-    alpha_os = np.zeros([4096, 2048]) * np.nan  # Note this gets reset after each slice
+    flux_os_linear = np.zeros([yosize, xosize]) * np.nan
+    flux_os_bspline_full = np.zeros([yosize, xosize]) * np.nan  # Full array holding all bspline models
+    flux_os_bspline_use = np.zeros([yosize, xosize]) * np.nan  # Actual array applied
+    x_os = np.zeros([yosize, xosize]) * np.nan
+    y_os = np.zeros([yosize, xosize]) * np.nan
+    alpha_os = np.zeros([yosize, xosize]) * np.nan  # Note this gets reset after each slice
 
     for slnum in range(slstart, slstop):
         print('Oversampling slice ', slnum)
         alpha_os[:] = np.nan
-        indx = np.where(beta_orig == uqbeta[slnum])
+        indx = np.where(slmap == slnum)
         # Data Naned out for everything except this slice
         thisdata = np.zeros_like(flux_orig) * np.nan
         thisdata[indx] = flux_orig[indx]
@@ -205,10 +269,10 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         sset_save = 0
 
         # A running vector of x column number in float units
-        runx = np.arange(2048).astype(float)
+        runx = np.arange(xsize).astype(float)
         # A running sum in a given detector column (used for normalization)
         runsum = np.nansum(thisdata, axis=0)
-        runsum2d = np.repeat(np.reshape(runsum, [1, len(runsum)]), 2048, axis=0)
+        runsum2d = np.repeat(np.reshape(runsum, [1, len(runsum)]), ysize, axis=0)
         # Traceset fit to running sum
         run_bad, run_good = np.where(runsum == 0), np.where(runsum != 0)
         if (bsmethod == 'sdss'):
@@ -218,7 +282,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
             runsumspl = scipybspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2, wrapsig_high=2, wrapiter=10, verbose=False)
             runsummodel = runsumspl(runx)
         runsummodel[run_bad] = np.nan
-        runsummodel2d = np.repeat(np.reshape(runsummodel, [1, len(runsummodel)]), 2048, axis=0)
+        runsummodel2d = np.repeat(np.reshape(runsummodel, [1, len(runsummodel)]), ysize, axis=0)
         # Scaled version of the data
         # There will be places where this was bad because of bad pixels affecting the sum,
         # but since we're working over many columns the occasional bad column will just be rejected
@@ -232,11 +296,9 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         thisx[indx] = basex[indx]
         thisy = np.zeros_like(flux_orig) * np.nan
         thisy[indx] = basey[indx]
-        # Alpha and beta coordinates Naned out for everything except this slice
+        # Alpha coordinates Naned out for everything except this slice
         thisalpha = np.zeros_like(flux_orig) * np.nan
         thisalpha[indx] = alpha_orig[indx]
-        thisbeta = np.zeros_like(flux_orig) * np.nan
-        thisbeta[indx] = beta_orig[indx]
 
         # Define an array that will hold all alpha values for this slice where the slope can be high
         alpha_ptsource = np.array([])
@@ -249,26 +311,37 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         medcmax = np.nanmedian(collapse)
         # Is medcmax over threshold?  If so do bspline for this slice.
         dospline = False
-        if (medcmax > thresh):
+        if (medcmax > thresh[slnum]):
             dospline = True
 
         # For NRS1, start on the left of detector since the tilt wrt pixels is greatest here
-        if (model.meta.instrument.detector == 'NRS1'):
-            drlstart, drlstop, drlstep = 0, 2048, 1
+        if (detector == 'NRS1'):
+            drlstart, drlstop, drlstep = 0, xsize, 1
         # For NRS2, start on the right of detector since the tilt wrt pixels is greatest here
-        elif (model.meta.instrument.detector == 'NRS2'):
-            drlstart, drlstop, drlstep = 2047, 0, -1
+        elif (detector == 'NRS2'):
+            drlstart, drlstop, drlstep = xsize-1, 0, -1
+        # For MIRI we need to start on the left and run to the middle, and then on the right to the middle
+        # in order to have the middle section not go too far beyond last good fit
+        elif (mode == 'MIRI'):
+            drlstart, drlstop, drlstep = 0, xsize, 1
+            drlrun = np.append(np.arange(0, xsize/2 + 1), np.arange(xsize-1, xsize/2, -1)).astype(int)
         else:
             print('ERROR: Unknown detector')
 
-        for ii in range(drlstart, drlstop, drlstep):
+        for iitemp in range(drlstart, drlstop, drlstep):
+            # If drlrun exists we're in the weird MIRI both-ends case, point ii into our predefined indices
+            try:
+                ii=drlrun[iitemp]
+            # Otherwise just use regular indexing
+            except:
+                ii=iitemp
             #print(ii)
             # Are there sufficient values in this column to do anything?
             temp = thisdata[:, ii].copy()
             temp = temp[np.isfinite(temp)]
             ngood = len(temp)
 
-            if (ngood > 15):
+            if (ngood > require_ngood):
                 # Y pixel coordinates in a given column
                 # Convert back to integer (cuz integers can't have NaN values)
                 tempy = thisy[:, ii]
@@ -308,14 +381,14 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
 
                     # Deal with detector edges
                     lstart = np.max(np.array([lstart, 0]))
-                    lstop = np.min(np.array([lstop, 2048]))
+                    lstop = np.min(np.array([lstop, xsize]))
                     # All alpha and data values in this region
                     alphatemp = thisalpha[:, lstart:lstop].ravel()
                     datatemp = thisdata_scaled[:, lstart:lstop].ravel()
                     # Vector describing the full alpha range with good sampling
                     alphavec = np.arange(np.nanmin(alphatemp), np.nanmax(alphatemp),
                                          (np.nanmax(alphatemp) - np.nanmin(alphatemp)) / 100)
-                    # Cut down alphavec and betavec to only finite values
+                    # Cut down alphavec to only finite values
                     indx = np.where(np.isfinite(datatemp))
                     alphatemp = alphatemp[indx]
                     datatemp = datatemp[indx]
@@ -329,7 +402,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                     #    pdb.set_trace()
                     if (bsmethod == 'sdss'):
                         try:
-                            sset = bspline_wrap(alphatemp, datatemp, nbkpts=62, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, verbose=False)
+                            sset = bspline_wrap(alphatemp, datatemp, nbkpts=splinebkpt, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, spaceratio=spaceratio, verbose=False)
                             # If this routine could not get a fit (returned zero) use the saved fit
                             if (sset == 0):
                                 sset = sset_save
@@ -343,7 +416,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                             sset = sset_save
                             datafit, _ = sset.value(alphavec)
                     else:
-                        spl = scipybspline_wrap(alphatemp, datatemp, nbkpts=62, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, verbose=False)
+                        spl = scipybspline_wrap(alphatemp, datatemp, nbkpts=splinebkpt, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, verbose=False)
                         datafit = spl(alphavec)
 
                     # Plot the spline model
@@ -360,7 +433,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                         plt.plot(thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=10, color='tab:green', label='Column data')
                         prange=np.where((alphavec > np.nanmin(thisalpha[:,ii]))&(alphavec < np.nanmax(thisalpha[:,ii])))
                         plt.plot(alphavec[prange], datafit[prange], linewidth=2,label='Bspline Fit',color='tab:orange')
-                        #plt.title('Column '+str(ii))
+                        plt.title('Column '+str(ii))
                         plt.xlabel(r'Along-slice coordinate (meters)',fontsize=14)
                         plt.ylabel('Scaled Intensity',fontsize=14)
                         plt.grid()
@@ -379,7 +452,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                     tempvalues = tempvalues[indx]
 
                     # What is the rough native pixel size in alpha in this column?
-                    native_dalpha = np.nanmedian(np.diff(tempalpha))
+                    native_dalpha = np.abs(np.nanmedian(np.diff(tempalpha)))
 
                     # Evaluate the bspline at the alpha for input Y locations
                     if (bsmethod == 'sdss'):
@@ -435,8 +508,13 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                         plt.show()
 
                     # What are the alpha values over sampled points in the old frame?
-                    _, tempalpha, _ = model.meta.wcs.transform('detector', 'slicer', np.repeat(ii, len(oldy)), oldy)
-                    tempalpha = -tempalpha  # Flip so increasing with increasing Y
+                    if (mode == 'NIRS'):
+                        _, tempalpha, _ = model.meta.wcs.transform('detector', 'slicer', np.repeat(ii, len(oldy)), oldy)
+                        tempalpha = -tempalpha  # Flip so increasing with increasing Y
+                    else:
+                        # Because MIRI was rotated the indexing in the non-rotated frame needs to be adjusted slightly
+                        tempalpha, _, _ = model.meta.wcs.transform('detector', 'alpha_beta', ysize-oldy-1, np.repeat(ii, len(oldy)))
+
                     # Evaluate the bspline at the alpha for these Y locations
                     if (bsmethod == 'sdss'):
                         tempfit, _ = sset.value(tempalpha)
@@ -446,6 +524,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                     tempfit[-2:] = np.nan
                     alpha_os[newy, ii] = tempalpha
                     flux_os_bspline_full[newy, ii] = (tempfit * wmeanratio)
+                    #if (ii == iiplot):
+                    #    pdb.set_trace()
 
                     if (ii == iiplot):
                         rc('axes', linewidth=2)
@@ -467,8 +547,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         # where traces are and we actually want to use the spline model
         # Don't bother with this if not enough recorded alpha values
         if (len(alpha_ptsource) > 50):
-            avec = np.arange(60) * native_dalpha / 2 - (native_dalpha * 15)
-            hist, edges = np.histogram(alpha_ptsource, bins=60, range=(-native_dalpha * 15, native_dalpha * 15),
+            avec = np.arange(splinebkpt) * native_dalpha / 2 - (native_dalpha * splinebkpt/4)
+            hist, edges = np.histogram(alpha_ptsource, bins=splinebkpt, range=(-native_dalpha * splinebkpt/4, native_dalpha * splinebkpt/4),
                                        density=True)
             hist = hist / np.nanmax(hist)
             # Require peaks above some threshold
@@ -486,7 +566,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
     # the simple interpolation algorithm will not be able to handle them properly)
     # Probably a much easier way to do this...
     nantemp = flux_os_linear.copy()
-    for qq in range(0, 2048):
+    for qq in range(0, ysize):
         nantemp[qq * 2, :] = flux_orig[qq, :]
         nantemp[qq * 2 + 1, :] = flux_orig[qq, :]
     indx = np.where(~np.isfinite(nantemp))
@@ -512,75 +592,112 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         hdu.writeto(outname, overwrite=True)
         #pdb.set_trace()
 
+    # If MIRI, undo all of our rotations before passing back the arrays
+    if (mode == 'MIRI'):
+        flux_os = np.rot90(flux_os, k=-1)
+        temp1 = np.rot90(x_os, k=-1)
+        temp2 = np.rot90(y_os, k=-1)
+        x_os = temp2
+        y_os = temp1
+
     return flux_os, x_os, y_os
 
-def drl_map(flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all):
+def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all):
+    if (instrument_name == 'MIRI'):
+        xsize, ysize = 1032, 1024
+        xosize, yosize = xsize*2, ysize
+    elif (instrument_name == 'NIRSPEC'):
+        xsize, ysize = 2048, 2048
+        xosize, yosize = xsize, ysize * 2
+    else:
+        print('Unknown instrument!')
+
     # Map 1d data back to 2d
-    x2d=np.zeros([2048,2048],dtype='int')
+    x2d=np.zeros([ysize,xsize],dtype='int')
     x2d[y,x]=x
-    y2d=np.zeros([2048,2048],dtype='int')
+    y2d=np.zeros([ysize,xsize],dtype='int')
     y2d[y,x]=y
-    ra2d=np.zeros([2048,2048])*np.nan
+    ra2d=np.zeros([ysize,xsize])*np.nan
     ra2d[y,x]=ra
-    dec2d=np.zeros([2048,2048])*np.nan
+    dec2d=np.zeros([ysize,xsize])*np.nan
     dec2d[y,x]=dec
-    wave2d=np.zeros([2048,2048])*np.nan
+    wave2d=np.zeros([ysize,xsize])*np.nan
     wave2d[y,x]=wave_all
-    slice2d=np.zeros([2048,2048])*np.nan
+    slice2d=np.zeros([ysize,xsize])*np.nan
     slice2d[y,x]=slice_no_all
-    dwave2d=np.zeros([2048,2048])*np.nan
+    dwave2d=np.zeros([ysize,xsize])*np.nan
     dwave2d[y,x]=dwave_all
 
-    cc2d0=np.zeros([2048,2048])*np.nan
+    cc2d0=np.zeros([ysize,xsize])*np.nan
     cc2d0[y,x]=corner_coord_all[0]
-    cc2d1=np.zeros([2048,2048])*np.nan
+    cc2d1=np.zeros([ysize,xsize])*np.nan
     cc2d1[y,x]=corner_coord_all[1]
-    cc2d2=np.zeros([2048,2048])*np.nan
+    cc2d2=np.zeros([ysize,xsize])*np.nan
     cc2d2[y,x]=corner_coord_all[2]
-    cc2d3=np.zeros([2048,2048])*np.nan
+    cc2d3=np.zeros([ysize,xsize])*np.nan
     cc2d3[y,x]=corner_coord_all[3]
-    cc2d4=np.zeros([2048,2048])*np.nan
+    cc2d4=np.zeros([ysize,xsize])*np.nan
     cc2d4[y,x]=corner_coord_all[4]
-    cc2d5=np.zeros([2048,2048])*np.nan
+    cc2d5=np.zeros([ysize,xsize])*np.nan
     cc2d5[y,x]=corner_coord_all[5]
-    cc2d6=np.zeros([2048,2048])*np.nan
+    cc2d6=np.zeros([ysize,xsize])*np.nan
     cc2d6[y,x]=corner_coord_all[6]
-    cc2d7=np.zeros([2048,2048])*np.nan
+    cc2d7=np.zeros([ysize,xsize])*np.nan
     cc2d7[y,x]=corner_coord_all[7]
 
-    ra_os2d=np.zeros([4096,2048])*np.nan
-    dec_os2d = np.zeros([4096, 2048]) * np.nan
-    wave_os2d = np.zeros([4096, 2048]) * np.nan
-    slice_os2d = np.zeros([4096, 2048]) * np.nan
-    dwave_os2d = np.zeros([4096, 2048]) * np.nan
-    cc_os2d0 = np.zeros([4096, 2048]) * np.nan
-    cc_os2d1 = np.zeros([4096, 2048]) * np.nan
-    cc_os2d2 = np.zeros([4096, 2048]) * np.nan
-    cc_os2d3 = np.zeros([4096, 2048]) * np.nan
-    cc_os2d4 = np.zeros([4096, 2048]) * np.nan
-    cc_os2d5 = np.zeros([4096, 2048]) * np.nan
-    cc_os2d6 = np.zeros([4096, 2048]) * np.nan
-    cc_os2d7 = np.zeros([4096, 2048]) * np.nan
-    for ii in range(0,2048):
+    ra_os2d=np.zeros([yosize,xosize])*np.nan
+    dec_os2d = np.zeros([yosize, xosize]) * np.nan
+    wave_os2d = np.zeros([yosize, xosize]) * np.nan
+    slice_os2d = np.zeros([yosize, xosize]) * np.nan
+    dwave_os2d = np.zeros([yosize, xosize]) * np.nan
+    cc_os2d0 = np.zeros([yosize, xosize]) * np.nan
+    cc_os2d1 = np.zeros([yosize, xosize]) * np.nan
+    cc_os2d2 = np.zeros([yosize, xosize]) * np.nan
+    cc_os2d3 = np.zeros([yosize, xosize]) * np.nan
+    cc_os2d4 = np.zeros([yosize, xosize]) * np.nan
+    cc_os2d5 = np.zeros([yosize, xosize]) * np.nan
+    cc_os2d6 = np.zeros([yosize, xosize]) * np.nan
+    cc_os2d7 = np.zeros([yosize, xosize]) * np.nan
+    for ii in range(0,xosize):
         if (ii % 100 == 0):
             print('Mapping column ', ii)
-        for jj in range(0,4096):
-            ystart = int(jj/2)-2
-            ystop = int(jj/2)+2
-            if (np.nansum(ra2d[ystart:ystop,ii]) != 0):
-                ra_os2d[jj,ii] = np.interp(y_os2d[jj,ii], y2d[ystart:ystop,ii], ra2d[ystart:ystop,ii])
-                dec_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], dec2d[ystart:ystop, ii])
-                wave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], wave2d[ystart:ystop, ii])
-                slice_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], slice2d[ystart:ystop, ii])
-                dwave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], dwave2d[ystart:ystop, ii])
-                cc_os2d0[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d0[ystart:ystop, ii])
-                cc_os2d1[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d1[ystart:ystop, ii])
-                cc_os2d2[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d2[ystart:ystop, ii])
-                cc_os2d3[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d3[ystart:ystop, ii])
-                cc_os2d4[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d4[ystart:ystop, ii])
-                cc_os2d5[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d5[ystart:ystop, ii])
-                cc_os2d6[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d6[ystart:ystop, ii])
-                cc_os2d7[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d7[ystart:ystop, ii])
+        for jj in range(0,yosize):
+            if (instrument_name == 'NIRSPEC'):
+                ystart = int(jj/2)-2
+                ystop = int(jj/2)+2
+                if (np.nansum(ra2d[ystart:ystop,ii]) != 0):
+                    ra_os2d[jj,ii] = np.interp(y_os2d[jj,ii], y2d[ystart:ystop,ii], ra2d[ystart:ystop,ii])
+                    dec_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], dec2d[ystart:ystop, ii])
+                    wave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], wave2d[ystart:ystop, ii])
+                    slice_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], slice2d[ystart:ystop, ii])
+                    dwave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], dwave2d[ystart:ystop, ii])
+                    cc_os2d0[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d0[ystart:ystop, ii])
+                    cc_os2d1[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d1[ystart:ystop, ii])
+                    cc_os2d2[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d2[ystart:ystop, ii])
+                    cc_os2d3[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d3[ystart:ystop, ii])
+                    cc_os2d4[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d4[ystart:ystop, ii])
+                    cc_os2d5[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d5[ystart:ystop, ii])
+                    cc_os2d6[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d6[ystart:ystop, ii])
+                    cc_os2d7[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d7[ystart:ystop, ii])
+            elif (instrument_name == 'MIRI'):
+                xstart = int(ii/2)-2
+                xstop = int(ii/2)+2
+                if (np.nansum(ra2d[jj,xstart:xstop]) != 0):
+                    ra_os2d[jj,ii] = np.interp(y_os2d[jj,ii], y2d[jj,xstart:xstop], ra2d[jj,xstart:xstop])
+                    dec_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], dec2d[jj,xstart:xstop])
+                    wave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], wave2d[jj,xstart:xstop])
+                    slice_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], slice2d[jj,xstart:xstop])
+                    dwave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], dwave2d[jj,xstart:xstop])
+                    cc_os2d0[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d0[jj,xstart:xstop])
+                    cc_os2d1[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d1[jj,xstart:xstop])
+                    cc_os2d2[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d2[jj,xstart:xstop])
+                    cc_os2d3[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d3[jj,xstart:xstop])
+                    cc_os2d4[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d4[jj,xstart:xstop])
+                    cc_os2d5[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d5[jj,xstart:xstop])
+                    cc_os2d6[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d6[jj,xstart:xstop])
+                    cc_os2d7[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d7[jj,xstart:xstop])
+            else:
+                print('Unknown instrument!')
 
     indx = np.where(np.isfinite(flux_os2d))
     flux_os = flux_os2d[indx]
@@ -2354,10 +2471,25 @@ class IFUCubeData:
         # The following is for both MIRI and NIRSPEC
 
         # DRL: Hack in an x2 oversampling using basis splines
-        #pdb.set_trace()
+        # This may not be the best place to do this; for MIRI at least this means that the entire oversampling will be
+        # done twice, once when processing the left channel and then the same thing again for the right.
+        # However, it's good enough for now.
         if oversample:
-            flux_os2d, x_os2d, y_os2d = drl_oversample(input_model, writeout=True)
-            mapresult = drl_map(flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all)
+            detector=input_model.meta.instrument.detector
+            # Slice range is 0-30 for NIRSpec
+            if ((detector == 'NRS1')|(detector == 'NRS2')):
+                slstart, slstop = 0, 30
+            # Slice range 0-38 for MIRI Ch 1/2
+            elif (detector == 'MIRIFUSHORT'):
+                slstart, slstop = 0, 38
+            # Slice range 0-28 for MIRI Ch3/4
+            elif (detector == 'MIRIFULONG'):
+                slstart, slstop = 0, 28
+            else:
+                print('Unknown detector!')
+
+            flux_os2d, x_os2d, y_os2d = drl_oversample(input_model,slstart=slstart,slstop=slstop, writeout=True)
+            mapresult = drl_map(input_model.meta.instrument.name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all)
             flux_os, x_os, y_os, ra_os, dec_os, wave_all_os, slice_no_all_os, dwave_all_os, corner_coord_all_os = mapresult
             x=x_os
             y=y_os
