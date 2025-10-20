@@ -161,7 +161,7 @@ def getweights(ratio, tempfit):
 # 'data' can be better when bright emission lines, model can be better when outliers
 # iiplot is the X pixel to make plots at
 # bsmethod can be 'sdss' or 'scipy'
-def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0.1, threshsig=10, lrange=50, scaling='data',iiplot=-771, bsmethod='sdss'):
+def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0.1, threshsig=10, lrange=50, scaling='data',iiplot=-343, bsmethod='sdss'):
     detector=model.meta.instrument.detector
     if ((detector == 'NRS1')|(detector == 'NRS2')):
         mode='NIRS'
@@ -349,6 +349,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                 # newy is the resampled Y pixel indices in the expanded detector frame
                 # oldy is the resampled Y pixel indices in the original detector frame
                 newy, oldy = reindex(tempy)
+                #if ((slnum == 15)&(ii == 72)):
+                #    pdb.set_trace()
 
                 # Do coordinate grids
                 x_os[newy, ii] = ii
@@ -398,8 +400,9 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                     datatemp = datatemp[indx]
                     # Fit a bspline
                     # 30 discrete pixels across the trace, so have double this number of breakpoints
-                    #if (ii == iiplot):
+                    #if ((ii == 343)&(slnum == 11)):
                     #    pdb.set_trace()
+
                     if (bsmethod == 'sdss'):
                         try:
                             sset = bspline_wrap(alphatemp, datatemp, nbkpts=splinebkpt, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, spaceratio=spaceratio, verbose=False)
@@ -409,18 +412,30 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                             else:
                                 #print('Saved sset from column ',ii)
                                 sset_save = sset
-                            datafit, _ = sset.value(alphavec)
+
+                            if (sset != 0):
+                                datafit, _ = sset.value(alphavec)
+                            else:
+                                continue
                         except:
                             # If we had some kind of exception, just used the saved spline fit
                             print('Bspline fail- using previous model')
+                            #pdb.set_trace()
                             sset = sset_save
-                            datafit, _ = sset.value(alphavec)
+                            if (sset != 0):
+                                datafit, _ = sset.value(alphavec)
+                            else:
+                                continue
                     else:
                         spl = scipybspline_wrap(alphatemp, datatemp, nbkpts=splinebkpt, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, verbose=False)
                         datafit = spl(alphavec)
 
+                    #if (np.nanmin(datafit < 0)):
+                    #    pdb.set_trace()
+
                     # Plot the spline model
                     if (ii == iiplot):
+                    #if ((ii == 73)&(slnum ==15)):
                     #if (ii % 10 == 0):
                         rc('axes', linewidth=2)
                         fig, ax = plt.subplots(1, 1, figsize=(6, 5), dpi=150)
@@ -531,6 +546,18 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                         rc('axes', linewidth=2)
                         fig, ax = plt.subplots(1, 1, figsize=(12, 5), dpi=200)
                         ax.tick_params(axis='both', which='major', labelsize=12)
+                        plt.plot(thisalpha[:, ii], thisdata[:, ii], 's', ms=10, color='tab:green',label='Column data')
+                        plt.plot(tempalpha,flux_os_linear[newy, ii],'s',color='tab:orange',label='Linear')
+                        plt.plot(tempalpha, flux_os_linear[newy, ii], color='tab:orange')
+                        plt.plot(tempalpha, flux_os_bspline_full[newy, ii], 's', color='tab:blue', label='Spline')
+                        plt.plot(tempalpha, flux_os_bspline_full[newy, ii], color='tab:blue')
+                        plt.legend()
+                        plt.show()
+
+                    if (ii == iiplot):
+                        rc('axes', linewidth=2)
+                        fig, ax = plt.subplots(1, 1, figsize=(12, 5), dpi=200)
+                        ax.tick_params(axis='both', which='major', labelsize=12)
                         plt.plot(newy, flux_os_linear[newy, ii], 's', ms=10, mfc='None', color='tab:blue', label='Linear Interpolation')
                         plt.plot(newy, flux_os_linear[newy, ii], linewidth=3, color='tab:blue')
                         plt.plot(newy, flux_os_bspline_full[newy, ii], 'd', ms=10, mfc='None', color='tab:orange', label='Spline Interpolation')
@@ -596,7 +623,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
     if (mode == 'MIRI'):
         flux_os = np.rot90(flux_os, k=-1)
         temp1 = np.rot90(x_os, k=-1)
-        temp2 = np.rot90(y_os, k=-1)
+        temp2 = ysize-1-np.rot90(y_os, k=-1)
         x_os = temp2
         y_os = temp1
 
@@ -683,21 +710,22 @@ def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, 
                 xstart = int(ii/2)-2
                 xstop = int(ii/2)+2
                 if (np.nansum(ra2d[jj,xstart:xstop]) != 0):
-                    ra_os2d[jj,ii] = np.interp(y_os2d[jj,ii], y2d[jj,xstart:xstop], ra2d[jj,xstart:xstop])
-                    dec_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], dec2d[jj,xstart:xstop])
-                    wave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], wave2d[jj,xstart:xstop])
-                    slice_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], slice2d[jj,xstart:xstop])
-                    dwave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], dwave2d[jj,xstart:xstop])
-                    cc_os2d0[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d0[jj,xstart:xstop])
-                    cc_os2d1[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d1[jj,xstart:xstop])
-                    cc_os2d2[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d2[jj,xstart:xstop])
-                    cc_os2d3[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d3[jj,xstart:xstop])
-                    cc_os2d4[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d4[jj,xstart:xstop])
-                    cc_os2d5[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d5[jj,xstart:xstop])
-                    cc_os2d6[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d6[jj,xstart:xstop])
-                    cc_os2d7[jj, ii] = np.interp(y_os2d[jj, ii], y2d[jj,xstart:xstop], cc2d7[jj,xstart:xstop])
+                    ra_os2d[jj,ii] = np.interp(x_os2d[jj,ii], x2d[jj,xstart:xstop], ra2d[jj,xstart:xstop])
+                    dec_os2d[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], dec2d[jj,xstart:xstop])
+                    wave_os2d[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], wave2d[jj,xstart:xstop])
+                    slice_os2d[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], slice2d[jj,xstart:xstop])
+                    dwave_os2d[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], dwave2d[jj,xstart:xstop])
+                    cc_os2d0[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d0[jj,xstart:xstop])
+                    cc_os2d1[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d1[jj,xstart:xstop])
+                    cc_os2d2[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d2[jj,xstart:xstop])
+                    cc_os2d3[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d3[jj,xstart:xstop])
+                    cc_os2d4[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d4[jj,xstart:xstop])
+                    cc_os2d5[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d5[jj,xstart:xstop])
+                    cc_os2d6[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d6[jj,xstart:xstop])
+                    cc_os2d7[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d7[jj,xstart:xstop])
             else:
                 print('Unknown instrument!')
+    #pdb.set_trace()
 
     indx = np.where(np.isfinite(flux_os2d))
     flux_os = flux_os2d[indx]
