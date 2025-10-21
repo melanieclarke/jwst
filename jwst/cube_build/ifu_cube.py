@@ -175,7 +175,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         # Note that MIRI gets rotated internally, so these are FLIPPED from usual orientation
         xsize, ysize = 1024, 1032
         xosize, yosize = xsize, ysize*2
-        require_ngood = 10
+        require_ngood = 8
         splinebkpt = 36
         spaceratio=1.2
     else:
@@ -242,12 +242,14 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         for ii in range(0, len(uqbeta)):
             if (ii in slnum_in_ch):
                 thresh[ii]=ch_mean + threshsig * ch_rms
+                #print(ii,ch_mean,ch_rms)
         # Ch2/3
         ch_mean, _, ch_rms = scs(flux_orig[0:chsplit,:])
         slnum_in_ch=np.unique(slmap[0:chsplit,:])
         for ii in range(0, len(uqbeta)):
             if (ii in slnum_in_ch):
                 thresh[ii]=ch_mean + threshsig * ch_rms
+                #print(ii,ch_mean,ch_rms)
 
     # Oversampled flux array (linear and bspline to compare)
     flux_os_linear = np.zeros([yosize, xosize]) * np.nan
@@ -430,12 +432,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                         spl = scipybspline_wrap(alphatemp, datatemp, nbkpts=splinebkpt, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, verbose=False)
                         datafit = spl(alphavec)
 
-                    #if (np.nanmin(datafit < 0)):
-                    #    pdb.set_trace()
-
                     # Plot the spline model
                     if (ii == iiplot):
-                    #if ((ii == 73)&(slnum ==15)):
                     #if (ii % 10 == 0):
                         rc('axes', linewidth=2)
                         fig, ax = plt.subplots(1, 1, figsize=(6, 5), dpi=150)
@@ -530,44 +528,41 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                         # Because MIRI was rotated the indexing in the non-rotated frame needs to be adjusted slightly
                         tempalpha, _, _ = model.meta.wcs.transform('detector', 'alpha_beta', ysize-oldy-1, np.repeat(ii, len(oldy)))
 
+                    # Define a highly-sampled alpha just to make some pretty plots with
+                    alpha_forplots=np.arange(np.nanmin(tempalpha),np.nanmax(tempalpha),(np.nanmax(tempalpha) - np.nanmin(tempalpha))/1e4)
+
                     # Evaluate the bspline at the alpha for these Y locations
                     if (bsmethod == 'sdss'):
                         tempfit, _ = sset.value(tempalpha)
+                        fit_forplots, _ = sset.value(alpha_forplots)
                     else:
                         tempfit = spl(tempalpha)
+                        fit_forplots = spl(alpha_forplots)
                     tempfit[0:2] = np.nan
                     tempfit[-2:] = np.nan
                     alpha_os[newy, ii] = tempalpha
                     flux_os_bspline_full[newy, ii] = (tempfit * wmeanratio)
+                    fit_forplots *= wmeanratio
                     #if (ii == iiplot):
                     #    pdb.set_trace()
 
                     if (ii == iiplot):
                         rc('axes', linewidth=2)
-                        fig, ax = plt.subplots(1, 1, figsize=(12, 5), dpi=200)
+                        fig, ax = plt.subplots(1, 1, figsize=(6, 5), dpi=150)
                         ax.tick_params(axis='both', which='major', labelsize=12)
-                        plt.plot(thisalpha[:, ii], thisdata[:, ii], 's', ms=10, color='tab:green',label='Column data')
-                        plt.plot(tempalpha,flux_os_linear[newy, ii],'s',color='tab:orange',label='Linear')
-                        plt.plot(tempalpha, flux_os_linear[newy, ii], color='tab:orange')
-                        plt.plot(tempalpha, flux_os_bspline_full[newy, ii], 's', color='tab:blue', label='Spline')
-                        plt.plot(tempalpha, flux_os_bspline_full[newy, ii], color='tab:blue')
+                        plt.plot(thisalpha[:, ii], thisdata[:, ii], 's', ms=10, color='tab:green',label='Original data')
+                        plt.plot(tempalpha,flux_os_linear[newy, ii],'d',ms=10,color='tab:orange',label='Linear Oversample')
+                        #plt.plot(tempalpha, flux_os_linear[newy, ii], color='tab:orange')
+                        plt.plot(tempalpha, flux_os_bspline_full[newy, ii], 'o', ms=10, color='tab:blue', label='Spline Oversample')
+                        #plt.plot(tempalpha, flux_os_bspline_full[newy, ii], color='tab:blue')
+                        plt.plot(alpha_forplots,fit_forplots,color='black',zorder=0,label='Spline Model')
+                        plt.xlabel(r'Along-slice coordinate (meters)', fontsize=14)
+                        plt.ylabel('Intensity', fontsize=14)
+                        plt.xlim(-0.0045,-0.001)
+                        plt.grid()
                         plt.legend()
                         plt.show()
 
-                    if (ii == iiplot):
-                        rc('axes', linewidth=2)
-                        fig, ax = plt.subplots(1, 1, figsize=(12, 5), dpi=200)
-                        ax.tick_params(axis='both', which='major', labelsize=12)
-                        plt.plot(newy, flux_os_linear[newy, ii], 's', ms=10, mfc='None', color='tab:blue', label='Linear Interpolation')
-                        plt.plot(newy, flux_os_linear[newy, ii], linewidth=3, color='tab:blue')
-                        plt.plot(newy, flux_os_bspline_full[newy, ii], 'd', ms=10, mfc='None', color='tab:orange', label='Spline Interpolation')
-                        plt.plot(newy, flux_os_bspline_full[newy, ii], linewidth=3, color='tab:orange')
-                        plt.xlabel(r'Resampled Row (pixels)', fontsize=14)
-                        plt.ylabel('Resampled Intensity', fontsize=14)
-                        plt.grid()
-                        plt.legend(fontsize=14)
-                        plt.tight_layout()
-                        plt.show()
 
         # Now that our initial loop along the slice is done, we have a spline model everywhere
         # Now look at our list of alpha values where model slopes were high to figure out
@@ -604,6 +599,17 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
     flux_os = flux_os_linear.copy()  # Ensure we don't accidentally write into the linear data
     flux_os[indx] = flux_os_bspline_use[indx]
 
+    # If MIRI, undo all of our rotations before passing back the arrays
+    if (mode == 'MIRI'):
+        flux_os = np.rot90(flux_os, k=-1)
+        flux_os_linear = np.rot90(flux_os_linear, k=-1)
+        flux_os_bspline_use = np.rot90(flux_os_bspline_use, k=-1)
+        flux_os_bspline_full = np.rot90(flux_os_bspline_full, k=-1)
+        temp1 = np.rot90(x_os, k=-1)
+        temp2 = ysize-1-np.rot90(y_os, k=-1)
+        x_os = temp2
+        y_os = temp1
+
     if writeout:
         outname=model.meta.filename.replace('.fits','_oversamp.fits')
         hdu=fits.PrimaryHDU(flux_os)
@@ -618,14 +624,6 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         hdu = fits.PrimaryHDU(flux_os_bspline_full)
         hdu.writeto(outname, overwrite=True)
         #pdb.set_trace()
-
-    # If MIRI, undo all of our rotations before passing back the arrays
-    if (mode == 'MIRI'):
-        flux_os = np.rot90(flux_os, k=-1)
-        temp1 = np.rot90(x_os, k=-1)
-        temp2 = ysize-1-np.rot90(y_os, k=-1)
-        x_os = temp2
-        y_os = temp1
 
     return flux_os, x_os, y_os
 
