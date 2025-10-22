@@ -161,7 +161,7 @@ def getweights(ratio, tempfit):
 # 'data' can be better when bright emission lines, model can be better when outliers
 # iiplot is the X pixel to make plots at
 # bsmethod can be 'sdss' or 'scipy'
-def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0.1, threshsig=10, lrange=50, scaling='data',iiplot=-343, bsmethod='sdss'):
+def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, threshsig=10, lrange=50, scaling='data',iiplot=-343, bsmethod='sdss'):
     detector=model.meta.instrument.detector
     if ((detector == 'NRS1')|(detector == 'NRS2')):
         mode='NIRS'
@@ -170,6 +170,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         require_ngood = 15
         splinebkpt = 62
         spaceratio=1.6
+        pad=2
+        trimends=True # Trimming ends of the interpolation can help with bad extrapolations
     elif ((detector == 'MIRIFUSHORT')|(detector == 'MIRIFULONG')):
         mode='MIRI'
         # Note that MIRI gets rotated internally, so these are FLIPPED from usual orientation
@@ -178,6 +180,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
         require_ngood = 8
         splinebkpt = 36
         spaceratio=1.2
+        pad=3
+        trimends=False  # Trimming ends is bad for MIRI, where dithers place point sources near the ends
     else:
         print('Unknown detector')
         return
@@ -351,7 +355,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                 # newy is the resampled Y pixel indices in the expanded detector frame
                 # oldy is the resampled Y pixel indices in the original detector frame
                 newy, oldy = reindex(tempy)
-                #if ((slnum == 15)&(ii == 72)):
+                #if ((slnum == 13)&(ii == 352)):
                 #    pdb.set_trace()
 
                 # Do coordinate grids
@@ -538,8 +542,11 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, pad=2, slopelim=0
                     else:
                         tempfit = spl(tempalpha)
                         fit_forplots = spl(alpha_forplots)
-                    tempfit[0:2] = np.nan
-                    tempfit[-2:] = np.nan
+                    #if ((slnum == 13)&(ii == 327)):
+                    #    pdb.set_trace()
+                    if trimends:
+                        tempfit[0:2] = np.nan
+                        tempfit[-2:] = np.nan
                     alpha_os[newy, ii] = tempalpha
                     flux_os_bspline_full[newy, ii] = (tempfit * wmeanratio)
                     fit_forplots *= wmeanratio
