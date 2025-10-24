@@ -157,11 +157,9 @@ def getweights(ratio, tempfit):
 
 # slstart/stop is the slices to work on
 # pad is the padding for the replacement window
-# scaling can be 'data' or 'model' when putting samples together for bspline.
-# 'data' can be better when bright emission lines, model can be better when outliers
 # iiplot is the X pixel to make plots at
 # bsmethod can be 'sdss' or 'scipy'
-def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, threshsig=10, lrange=50, scaling='data',iiplot=-343, bsmethod='sdss'):
+def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, threshsig=10, lrange=50, iiplot=-343, complex_scene=False, bsmethod='sdss'):
     detector=model.meta.instrument.detector
     if ((detector == 'NRS1')|(detector == 'NRS2')):
         mode='NIRS'
@@ -263,6 +261,10 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
     y_os = np.zeros([yosize, xosize]) * np.nan
     alpha_os = np.zeros([yosize, xosize]) * np.nan  # Note this gets reset after each slice
 
+    # Residual corrections
+    residual=np.zeros_like(flux_orig)*np.nan
+    flux_os_residual = np.zeros([yosize, xosize]) * np.nan
+
     for slnum in range(slstart, slstop):
         print('Oversampling slice ', slnum)
         alpha_os[:] = np.nan
@@ -279,23 +281,11 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
         # A running sum in a given detector column (used for normalization)
         runsum = np.nansum(thisdata, axis=0)
         runsum2d = np.repeat(np.reshape(runsum, [1, len(runsum)]), ysize, axis=0)
-        # Traceset fit to running sum
-        run_bad, run_good = np.where(runsum == 0), np.where(runsum != 0)
-        if (bsmethod == 'sdss'):
-            runsumset = bspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2, wrapsig_high=2, wrapiter=10, verbose=False)
-            runsummodel, _ = runsumset.value(runx)
-        else:
-            runsumspl = scipybspline_wrap(runx[run_good], runsum[run_good], nbkpts=int(len(run_good[0]) / 30), wrapsig_low=2, wrapsig_high=2, wrapiter=10, verbose=False)
-            runsummodel = runsumspl(runx)
-        runsummodel[run_bad] = np.nan
-        runsummodel2d = np.repeat(np.reshape(runsummodel, [1, len(runsummodel)]), ysize, axis=0)
+
         # Scaled version of the data
         # There will be places where this was bad because of bad pixels affecting the sum,
         # but since we're working over many columns the occasional bad column will just be rejected
-        if (scaling == 'data'):
-            thisdata_scaled = thisdata / runsum2d
-        else:
-            thisdata_scaled = thisdata / runsummodel2d
+        thisdata_scaled = thisdata / runsum2d
 
         # X and Y detector coordinates Naned out for everything except this slice
         thisx = np.zeros_like(flux_orig) * np.nan
@@ -375,18 +365,6 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
                     # This is really detector X coordinate, but we'll call it l to avoid confusion elsewhere
                     lstart, lstop = ii - lrange, ii + lrange
 
-                    # Plot the fit to the runsum vector
-                    if (ii == iiplot):
-                        plt.plot(runx, runsum, zorder=0, label='data')
-                        plt.plot(runx, runsummodel, label='model')
-                        plt.xlim(lstart, lstop)
-                        plt.xlabel('X column')
-                        plt.ylabel('Runsum')
-                        plt.title(str(ii))
-                        plt.legend()
-                        plt.show()
-
-
                     # Deal with detector edges
                     lstart = np.max(np.array([lstart, 0]))
                     lstop = np.min(np.array([lstop, xsize]))
@@ -444,14 +422,14 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
                         ax.tick_params(axis='both', which='major', labelsize=12)
 
                         for jj in range(lstart, lstop):
-                            plt.plot(thisalpha[:, jj], thisdata_scaled[:, jj], '.', ms=12, color='black')
-                        plt.plot(thisalpha[:, lstart], thisdata_scaled[:, lstart], '.', ms=10, color='black',label='Samples')
+                            plt.plot(1e3*thisalpha[:, jj], thisdata_scaled[:, jj], '.', ms=12, color='black')
+                        plt.plot(1e3*thisalpha[:, lstart], thisdata_scaled[:, lstart], '.', ms=10, color='black',label='Samples')
                         # And the data values in the first column
-                        plt.plot(thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=10, color='tab:green', label='Column data')
+                        plt.plot(1e3*thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=10, color='tab:green', label='Column data')
                         prange=np.where((alphavec > np.nanmin(thisalpha[:,ii]))&(alphavec < np.nanmax(thisalpha[:,ii])))
-                        plt.plot(alphavec[prange], datafit[prange], linewidth=2,label='Bspline Fit',color='tab:orange')
+                        plt.plot(1e3*alphavec[prange], datafit[prange], linewidth=2,label='Bspline Fit',color='tab:orange')
                         plt.title('Column '+str(ii))
-                        plt.xlabel(r'Along-slice coordinate (meters)',fontsize=14)
+                        plt.xlabel(r'Along-slice coordinate (mm)',fontsize=14)
                         plt.ylabel('Scaled Intensity',fontsize=14)
                         plt.grid()
                         plt.legend(fontsize=14)
@@ -483,7 +461,16 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
                     # Weights start off proportional to flux
                     weights = getweights(ratio, tempfit)
                     wmeanratio = np.nansum(ratio * weights)
-                    #pdb.set_trace()
+
+                    # Construct the residual between spline fit and original data
+                    # then oversample it to output frame by linear interpolation
+                    residual[indx,ii]=tempvalues-tempfit*wmeanratio
+                    val1, val2 = thisy[:, ii], residual[:, ii]
+                    indx = np.where((np.isfinite(val1)) & (np.isfinite(val2)))
+                    interpval = np.interp(oldy, val1[indx], val2[indx])
+                    interpval[0:2] = np.nan
+                    interpval[-2:] = np.nan
+                    flux_os_residual[newy, ii] = interpval
 
                     # What was the slope of the model fit prior to scaling?
                     modelslope = np.abs(np.diff(tempfit, prepend=0))
@@ -557,15 +544,15 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
                         rc('axes', linewidth=2)
                         fig, ax = plt.subplots(1, 1, figsize=(6, 5), dpi=150)
                         ax.tick_params(axis='both', which='major', labelsize=12)
-                        plt.plot(thisalpha[:, ii], thisdata[:, ii], 's', ms=10, color='tab:green',label='Original data')
-                        plt.plot(tempalpha,flux_os_linear[newy, ii],'d',ms=10,color='tab:orange',label='Linear Oversample')
+                        plt.plot(thisalpha[:, ii]*1e3, thisdata[:, ii], 's', ms=10, color='tab:green',label='Original data')
+                        plt.plot(tempalpha*1e3,flux_os_linear[newy, ii],'d',ms=10,color='tab:orange',label='Linear Oversample')
                         #plt.plot(tempalpha, flux_os_linear[newy, ii], color='tab:orange')
-                        plt.plot(tempalpha, flux_os_bspline_full[newy, ii], 'o', ms=10, color='tab:blue', label='Spline Oversample')
+                        plt.plot(tempalpha*1e3, flux_os_bspline_full[newy, ii], 'o', ms=10, color='tab:blue', label='Spline Oversample')
                         #plt.plot(tempalpha, flux_os_bspline_full[newy, ii], color='tab:blue')
-                        plt.plot(alpha_forplots,fit_forplots,color='black',zorder=0,label='Spline Model')
-                        plt.xlabel(r'Along-slice coordinate (meters)', fontsize=14)
+                        plt.plot(alpha_forplots*1e3,fit_forplots,color='black',zorder=0,label='Spline Model')
+                        plt.xlabel(r'Along-slice coordinate (mm)', fontsize=14)
                         plt.ylabel('Intensity', fontsize=14)
-                        plt.xlim(-0.0045,-0.001)
+                        #plt.xlim(-4.5,-1)
                         plt.grid()
                         plt.legend()
                         plt.show()
@@ -605,6 +592,9 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
     indx = np.where(np.isfinite(flux_os_bspline_use))
     flux_os = flux_os_linear.copy()  # Ensure we don't accidentally write into the linear data
     flux_os[indx] = flux_os_bspline_use[indx]
+    # If complex scene was selected, add in the residual fit
+    if (complex_scene == True):
+        flux_os[indx] += flux_os_residual[indx]
 
     # If MIRI, undo all of our rotations before passing back the arrays
     if (mode == 'MIRI'):
@@ -629,6 +619,9 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
         hdu.writeto(outname, overwrite=True)
         outname = model.meta.filename.replace('.fits', '_oversamp_bspline_full.fits')
         hdu = fits.PrimaryHDU(flux_os_bspline_full)
+        hdu.writeto(outname, overwrite=True)
+        outname = model.meta.filename.replace('.fits', '_oversamp_residual.fits')
+        hdu = fits.PrimaryHDU(flux_os_residual)
         hdu.writeto(outname, overwrite=True)
         #pdb.set_trace()
 
