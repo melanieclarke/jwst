@@ -159,7 +159,7 @@ def getweights(ratio, tempfit):
 # pad is the padding for the replacement window
 # iiplot is the X pixel to make plots at
 # bsmethod can be 'sdss' or 'scipy'
-def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, threshsig=10, lrange=50, iiplot=-343, complex_scene=False, bsmethod='sdss'):
+def drl_oversample(model, writeout=True, slstart=0, slstop=30, threshsig=10, lrange=50, iiplot=-343, psfoptimal=False, bsmethod='sdss'):
     detector=model.meta.instrument.detector
     if ((detector == 'NRS1')|(detector == 'NRS2')):
         mode='NIRS'
@@ -183,6 +183,11 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
     else:
         print('Unknown detector')
         return
+
+    if (psfoptimal == True):
+        slopelim=0.0
+    else:
+        slopelim=0.1
 
     # Define MIRI detector-specific column splitting the two wavelength channels
     if (detector == 'MIRIFUSHORT'):
@@ -592,8 +597,9 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
     indx = np.where(np.isfinite(flux_os_bspline_use))
     flux_os = flux_os_linear.copy()  # Ensure we don't accidentally write into the linear data
     flux_os[indx] = flux_os_bspline_use[indx]
-    # If complex scene was selected, add in the residual fit
-    if (complex_scene == True):
+    # Unless we're doing a specific psf optimal extraction, add in the residual fit
+    if (psfoptimal == False):
+        print('Applying complex scene corrections.')
         flux_os[indx] += flux_os_residual[indx]
 
     # If MIRI, undo all of our rotations before passing back the arrays
@@ -602,6 +608,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, slopelim=0.1, thr
         flux_os_linear = np.rot90(flux_os_linear, k=-1)
         flux_os_bspline_use = np.rot90(flux_os_bspline_use, k=-1)
         flux_os_bspline_full = np.rot90(flux_os_bspline_full, k=-1)
+        flux_os_residual = np.rot90(flux_os_residual, k=-1)
         temp1 = np.rot90(x_os, k=-1)
         temp2 = ysize-1-np.rot90(y_os, k=-1)
         x_os = temp2
