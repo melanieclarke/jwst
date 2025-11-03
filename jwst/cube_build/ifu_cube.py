@@ -159,7 +159,8 @@ def getweights(ratio, tempfit):
 # pad is the padding for the replacement window
 # iiplot is the X pixel to make plots at
 # bsmethod can be 'sdss' or 'scipy'
-def drl_oversample(model, writeout=True, slstart=0, slstop=30, threshsig=10, lrange=50, iiplot=-343, psfoptimal=False, bsmethod='sdss'):
+# threshsig and slopelim can be useful to decrease if there are fainter point sources that need to be spline fit too
+def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot=-343, threshsig=10, slopelim=0.1, psfoptimal=False, bsmethod='sdss'):
     detector=model.meta.instrument.detector
     if ((detector == 'NRS1')|(detector == 'NRS2')):
         mode='NIRS'
@@ -183,11 +184,6 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, threshsig=10, lra
     else:
         print('Unknown detector')
         return
-
-    if (psfoptimal == True):
-        slopelim=0.0
-    else:
-        slopelim=0.1
 
     # Define MIRI detector-specific column splitting the two wavelength channels
     if (detector == 'MIRIFUSHORT'):
@@ -1350,7 +1346,7 @@ class IFUCubeData:
                 log.info(f"Cube covers grating, filter: {this_gwa}, {this_fwa}")
 
     # ________________________________________________________________________________
-    def build_ifucube(self,oversample=False):
+    def build_ifucube(self,oversample=False,threshsig=10,slopelim=0.1):
         """
         Create an IFU cube.
 
@@ -1423,7 +1419,7 @@ class IFUCubeData:
                 log.debug(f"Working on Band defined by: {this_par1} {this_par2}")
 
                 if self.interpolation in ["pointcloud", "drizzle"]:
-                    pixelresult = self.map_detector_to_outputframe(this_par1, input_model, oversample)
+                    pixelresult = self.map_detector_to_outputframe(this_par1, input_model, oversample, threshsig, slopelim)
 
                     (
                         coord1,
@@ -2425,7 +2421,7 @@ class IFUCubeData:
         self.print_cube_geometry()
 
     # ________________________________________________________________________________
-    def map_detector_to_outputframe(self, this_par1, input_model, oversample=False):
+    def map_detector_to_outputframe(self, this_par1, input_model, oversample=False, threshsig=10, slopelim=0.1):
         """
         Loop over a file and map the detector pixels to the output cube.
 
@@ -2521,7 +2517,7 @@ class IFUCubeData:
             else:
                 print('Unknown detector!')
 
-            flux_os2d, x_os2d, y_os2d = drl_oversample(input_model,slstart=slstart,slstop=slstop, writeout=True)
+            flux_os2d, x_os2d, y_os2d = drl_oversample(input_model,slstart=slstart,slstop=slstop, writeout=True, threshsig=threshsig, slopelim=slopelim)
             mapresult = drl_map(input_model.meta.instrument.name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all)
             flux_os, x_os, y_os, ra_os, dec_os, wave_all_os, slice_no_all_os, dwave_all_os, corner_coord_all_os = mapresult
             x=x_os
