@@ -185,6 +185,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
         print('Unknown detector')
         return
 
+    print('psfoptimal = ',psfoptimal)
+
     # Define MIRI detector-specific column splitting the two wavelength channels
     if (detector == 'MIRIFUSHORT'):
         chsplit = 509
@@ -204,6 +206,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
     else:
         alpha_orig, beta_orig, _ = model.meta.wcs.transform('detector', 'alpha_beta', np.rot90(basey,k=1), np.rot90(basex,k=-1))
         # MIRI needs a more difficult way of sorting slices left to right respecting channel boundary
+        # Hack beta of one side of the detector to ensure no overlap with the other
+        beta_orig[:,0:503]+=10
         uqbeta = []
         btemp = beta_orig[500,:]
         btemp=btemp[np.isfinite(btemp)]
@@ -211,6 +215,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
             if (not (btemp[tt] in uqbeta)):
                 uqbeta = np.append(uqbeta, btemp[tt])
         uqbeta = np.array(uqbeta)
+        print('Found ',len(uqbeta),' slices.')
         # MIRI will rotate all arrays for convenience to line up with NIRSpec convention
         flux_orig = np.rot90(model.data)
         alpha_orig = np.rot90(alpha_orig)
@@ -308,6 +313,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
         medcmax = np.nanmedian(collapse)
         # Is medcmax over threshold?  If so do bspline for this slice.
         dospline = False
+
         if (medcmax > thresh[slnum]):
             dospline = True
 
@@ -346,7 +352,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
                 # newy is the resampled Y pixel indices in the expanded detector frame
                 # oldy is the resampled Y pixel indices in the original detector frame
                 newy, oldy = reindex(tempy)
-                #if ((slnum == 13)&(ii == 352)):
+                #if ((slnum == 15)&(ii == 877)):
                 #    pdb.set_trace()
 
                 # Do coordinate grids
@@ -596,6 +602,13 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
     # Unless we're doing a specific psf optimal extraction, add in the residual fit
     if (psfoptimal == False):
         print('Applying complex scene corrections.')
+        # DRL- conflicted about this indx array
+        # Using only where flux_os_bspline_use is finite will trim the slice edges a bit
+        # because the spline can extend slightly beyond the linear interpolation which can
+        # be bad for sources on the edge.  But requiring the residual to also be finite
+        # can result in bad performance when the residual correction was really NEEDED
+        # on the edge.
+        indx = np.where(np.isfinite(flux_os_bspline_use) & np.isfinite(flux_os_residual))
         flux_os[indx] += flux_os_residual[indx]
 
     # If MIRI, undo all of our rotations before passing back the arrays
@@ -1346,7 +1359,7 @@ class IFUCubeData:
                 log.info(f"Cube covers grating, filter: {this_gwa}, {this_fwa}")
 
     # ________________________________________________________________________________
-    def build_ifucube(self,oversample=False,threshsig=10,slopelim=0.1):
+    def build_ifucube(self,oversample=False,threshsig=10,slopelim=0.1,psfoptimal=False):
         """
         Create an IFU cube.
 
@@ -1419,7 +1432,8 @@ class IFUCubeData:
                 log.debug(f"Working on Band defined by: {this_par1} {this_par2}")
 
                 if self.interpolation in ["pointcloud", "drizzle"]:
-                    pixelresult = self.map_detector_to_outputframe(this_par1, input_model, oversample, threshsig, slopelim)
+                    pixelresult = self.map_detector_to_outputframe(this_par1, input_model, oversample, threshsig,
+                                                                   slopelim,psfoptimal)
 
                     (
                         coord1,
@@ -2421,7 +2435,7 @@ class IFUCubeData:
         self.print_cube_geometry()
 
     # ________________________________________________________________________________
-    def map_detector_to_outputframe(self, this_par1, input_model, oversample=False, threshsig=10, slopelim=0.1):
+    def map_detector_to_outputframe(self, this_par1, input_model, oversample=False, threshsig=10, slopelim=0.1,psfoptimal=False):
         """
         Loop over a file and map the detector pixels to the output cube.
 
@@ -2517,7 +2531,7 @@ class IFUCubeData:
             else:
                 print('Unknown detector!')
 
-            flux_os2d, x_os2d, y_os2d = drl_oversample(input_model,slstart=slstart,slstop=slstop, writeout=True, threshsig=threshsig, slopelim=slopelim)
+            flux_os2d, x_os2d, y_os2d = drl_oversample(input_model,slstart=slstart,slstop=slstop, writeout=True, threshsig=threshsig, slopelim=slopelim, psfoptimal=psfoptimal)
             mapresult = drl_map(input_model.meta.instrument.name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all)
             flux_os, x_os, y_os, ra_os, dec_os, wave_all_os, slice_no_all_os, dwave_all_os, corner_coord_all_os = mapresult
             x=x_os

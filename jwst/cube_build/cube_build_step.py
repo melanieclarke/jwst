@@ -53,6 +53,7 @@ class CubeBuildStep(Step):
          oversample = boolean(default=false) # Oversample the data
          threshsig = float(default=10) # Limiting sigma for oversampling splines
          slopelim = float(default=0.1) # Slope limit for oversampling splines
+         psfoptimal = boolean(default=False)
        """  # noqa: E501
 
     reference_file_types = ["cubepar"]
@@ -418,7 +419,7 @@ class CubeBuildStep(Step):
             # Else standard IFU cube building
             # the result returned from build_ifucube will be 1 IFU CUBE
             else:
-                result, status = thiscube.build_ifucube(self.oversample,self.threshsig,self.slopelim)
+                result, status = thiscube.build_ifucube(self.oversample,self.threshsig,self.slopelim,self.psfoptimal)
 
                 # check if cube_build failed
                 # **************************
