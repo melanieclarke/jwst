@@ -6,9 +6,7 @@ import warnings
 import matplotlib.pyplot as plt
 from matplotlib import rc
 import pdb
-import pydl.pydlutils.bspline as bs
-from astropy.modeling.models import Spline1D
-from astropy.modeling.fitting import SplineExactKnotsFitter
+from scipy.interpolate import make_lsq_spline
 
 from scipy.signal import find_peaks
 from astropy.stats import sigma_clipped_stats as scs
@@ -37,43 +35,7 @@ __all__ = ["IFUCubeData", "IncorrectInputError", "IncorrectParameterError"]
 
 # This version uses only astropy/scipy but is roughly 3x slower
 # It has also not been optimized for science as well as bspline_wrap
-def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, verbose=False):
-    xvec_use = xvec.copy()
-    yvec_use = yvec.copy()
-    indx = np.where((np.isfinite(xvec_use)) & (np.isfinite(yvec_use)))
-    xvec_use = xvec_use[indx]
-    yvec_use = yvec_use[indx]
-
-    knotspacing = (np.max(xvec_use) - np.min(xvec_use)) / nbkpts
-    knotmin = np.min(xvec_use) + knotspacing / 2.
-    knotmax = np.max(xvec_use) - knotspacing / 2.
-
-    # knots=np.arange(np.min(xvec_use),np.max(xvec_use),(np.max(xvec_use)-np.min(xvec_use))/nbkpts)
-    # knots=np.arange(-0.006,0.006,0.0002)
-    knots = np.arange(knotmin, knotmax, knotspacing)
-    #print(knots)
-    spl = Spline1D()
-    fitter = SplineExactKnotsFitter()
-
-    for ii in range(0, wrapiter):
-        #print('ii = ', ii)
-        spl1 = fitter(spl, xvec_use, yvec_use, t=knots)
-        ytemp = spl1(xvec_use)
-        diff = yvec_use - ytemp
-        rms = np.nanstd(diff)
-        rej = np.where((diff < -wrapsig_low * rms) | (diff > wrapsig_high * rms))
-        keep = np.where((diff >= -wrapsig_low * rms) & (diff <= wrapsig_high * rms))
-        if verbose:
-            print('Rejected', len(rej[0]), 'Kept', len(keep[0]))
-        xvec_use = xvec_use[keep]
-        yvec_use = yvec_use[keep]
-        # If no points rejected break out of the loop
-        if (len(rej[0]) == 0):
-            break
-
-    return spl1
-
-def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, spaceratio=1.6, verbose=False):
+def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, spaceratio=1.6, verbose=False):
     xvec_use = xvec.copy()
     yvec_use = yvec.copy()
     sset = 0
@@ -104,12 +66,16 @@ def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=
 
     for ii in range(0, wrapiter):
         knotspacing = (np.max(xvec_use) - np.min(xvec_use)) / nbkpts
-        knotmin = np.min(xvec_use) + knotspacing / 2.
+        knotmin = np.min(xvec_use)
         knotmax = np.max(xvec_use) - knotspacing / 2.
         knots = np.arange(knotmin, knotmax, knotspacing)
+        k=3
+        xb = xvec_use[0]
+        xe = xvec_use[-1]
+        knots = np.concatenate(([xb] * (k + 1), knots, [xe] * (k + 1)))
 
-        sset, _ = bs.iterfit(xvec_use, yvec_use, bkpt=knots)
-        ytemp, _ = sset.value(xvec_use)
+        spl1 = make_lsq_spline(xvec_use, yvec_use, knots, k=k)
+        ytemp = spl1(xvec_use)
         diff = yvec_use - ytemp
         rms = np.nanstd(diff)
         rej = np.where((diff < -wrapsig_low * rms) | (diff > wrapsig_high * rms))
@@ -118,10 +84,11 @@ def bspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=
             print('Rejected', len(rej[0]), 'Kept', len(keep[0]))
         xvec_use = xvec_use[keep]
         yvec_use = yvec_use[keep]
+        # If no points rejected break out of the loop
         if (len(rej[0]) == 0):
             break
 
-    return sset
+    return spl1
 
 # Function to convert pixel positions on the old grid to doubled pixel positions
 # E.g., [0,1,2,3,4,5] goes to [-0.25, 0.25, 0.75, 1.25, 1.75, etc]
@@ -158,9 +125,8 @@ def getweights(ratio, tempfit):
 # slstart/stop is the slices to work on
 # pad is the padding for the replacement window
 # iiplot is the X pixel to make plots at
-# bsmethod can be 'sdss' or 'scipy'
 # threshsig and slopelim can be useful to decrease if there are fainter point sources that need to be spline fit too
-def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot=-343, threshsig=10, slopelim=0.1, psfoptimal=False, bsmethod='sdss'):
+def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot=-343, threshsig=10, slopelim=0.1, psfoptimal=False):
     detector=model.meta.instrument.detector
     if ((detector == 'NRS1')|(detector == 'NRS2')):
         mode='NIRS'
@@ -394,32 +360,30 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
                     #if ((ii == 343)&(slnum == 11)):
                     #    pdb.set_trace()
 
-                    if (bsmethod == 'sdss'):
-                        try:
-                            sset = bspline_wrap(alphatemp, datatemp, nbkpts=splinebkpt, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, spaceratio=spaceratio, verbose=False)
-                            # If this routine could not get a fit (returned zero) use the saved fit
-                            if (sset == 0):
-                                sset = sset_save
-                            else:
-                                #print('Saved sset from column ',ii)
-                                sset_save = sset
 
-                            if (sset != 0):
-                                datafit, _ = sset.value(alphavec)
-                            else:
-                                continue
-                        except:
-                            # If we had some kind of exception, just used the saved spline fit
-                            print('Bspline fail- using previous model')
-                            #pdb.set_trace()
-                            sset = sset_save
-                            if (sset != 0):
-                                datafit, _ = sset.value(alphavec)
-                            else:
-                                continue
-                    else:
-                        spl = scipybspline_wrap(alphatemp, datatemp, nbkpts=splinebkpt, wrapsig_low=2.5, wrapsig_high=2.5,wrapiter=10, verbose=False)
-                        datafit = spl(alphavec)
+                    try:
+                        spl = scipybspline_wrap(alphatemp, datatemp, nbkpts=splinebkpt, wrapsig_low=2.5,
+                                                wrapsig_high=2.5, wrapiter=10, spaceratio=spaceratio, verbose=False)
+                        # If this routine could not get a fit (returned zero) use the saved fit
+                        if (spl == 0):
+                            spl = spl_save
+                        else:
+                            #print('Saved sset from column ',ii)
+                            spl_save = spl
+
+                        if (spl != 0):
+                            datafit = spl(alphavec)
+                        else:
+                            continue
+                    except:
+                        # If we had some kind of exception, just used the saved spline fit
+                        print('Bspline fail- using previous model')
+                        #pdb.set_trace()
+                        spl = spl_save
+                        if (spl != 0):
+                            datafit = spl(alphavec)
+                        else:
+                            continue
 
                     # Plot the spline model
                     if (ii == iiplot):
@@ -457,17 +421,16 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
                     native_dalpha = np.abs(np.nanmedian(np.diff(tempalpha)))
 
                     # Evaluate the bspline at the alpha for input Y locations
-                    if (bsmethod == 'sdss'):
-                        tempfit, _ = sset.value(tempalpha)
-                    else:
-                        tempfit = spl(tempalpha)
+                    tempfit = spl(tempalpha)
                     # Determine the normalization by the weighted mean ratio between model and data
                     # Weights are based on the model so that we can reject outliers
-                    ratio = tempvalues / tempfit
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(action="ignore", category=RuntimeWarning)
 
-                    # Weights start off proportional to flux
-                    weights = getweights(ratio, tempfit)
-                    wmeanratio = np.nansum(ratio * weights)
+                        ratio = tempvalues / tempfit
+                        # Weights start off proportional to flux
+                        weights = getweights(ratio, tempfit)
+                        wmeanratio = np.nansum(ratio * weights)
 
                     # Construct the residual between spline fit and original data
                     # then oversample it to output frame by linear interpolation
@@ -530,12 +493,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
                     alpha_forplots=np.arange(np.nanmin(tempalpha),np.nanmax(tempalpha),(np.nanmax(tempalpha) - np.nanmin(tempalpha))/1e4)
 
                     # Evaluate the bspline at the alpha for these Y locations
-                    if (bsmethod == 'sdss'):
-                        tempfit, _ = sset.value(tempalpha)
-                        fit_forplots, _ = sset.value(alpha_forplots)
-                    else:
-                        tempfit = spl(tempalpha)
-                        fit_forplots = spl(alpha_forplots)
+                    tempfit = spl(tempalpha)
+                    fit_forplots = spl(alpha_forplots)
                     #if ((slnum == 13)&(ii == 327)):
                     #    pdb.set_trace()
                     if trimends:
