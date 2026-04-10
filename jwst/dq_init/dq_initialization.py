@@ -5,12 +5,10 @@ from stdatamodels.jwst import datamodels
 
 from jwst.datamodels import dqflags  # type: ignore[attr-defined]
 from jwst.lib import reffile_utils
+from jwst.lib.exposure_types import FGS_GUIDE_EXP_TYPES
 
 log = logging.getLogger(__name__)
 
-
-# FGS guide star mode exposure types
-guider_list = ["FGS_ID-IMAGE", "FGS_ID-STACK", "FGS_ACQ1", "FGS_ACQ2", "FGS_TRACK", "FGS_FINEGUIDE"]
 
 __all__ = ["do_dqinit", "check_dimensions"]
 
@@ -36,7 +34,7 @@ def do_dqinit(output_model, mask_model, user_dq=None):
         The corrected JWST datamodel, updated in place.
     """
     # Inflate empty DQ array, if necessary
-    check_dimensions(output_model)
+    # check_dimensions(output_model)
 
     # Extract subarray from reference data, if necessary
     # TODO: is it possible for stripe mask to match the input model? If so, this will fail.
@@ -59,7 +57,7 @@ def do_dqinit(output_model, mask_model, user_dq=None):
 
     # Set model-specific data quality in output
     num_superstripe = getattr(output_model.meta.subarray, "num_superstripe", None)
-    if output_model.meta.exposure.type in guider_list:
+    if str(output_model.meta.exposure.type).lower() in FGS_GUIDE_EXP_TYPES:
         output_model.dq |= mask_array
 
     elif num_superstripe is not None and num_superstripe > 0:
@@ -101,7 +99,6 @@ def check_dimensions(input_model):
         Input datamodel.
     """
     input_shape = input_model.data.shape
-
     if isinstance(input_model, datamodels.GuiderRawModel):
         if input_model.dq.shape != input_shape[-2:]:
             # If the shape is different, then the mask model should have
