@@ -213,6 +213,8 @@ class CubeBuildStep(Step):
 
         # Read in the input data and make a copy as needed.
         read_in_models = self.prepare_output(input_data)
+        if self.single:
+            self.add_asn_id_to_output_name(read_in_models)
 
         # Set the output base name
         input_table = data_types.DataTypes(
