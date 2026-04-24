@@ -223,7 +223,9 @@ addopts = [
 ]
 xfail_strict = true
 filterwarnings = [
-    "error"
+    "error",
+    # https://github.com/astropy/astropy/issues/19579
+    #"ignore:Setting the dtype on a NumPy array has been deprecated:DeprecationWarning",
 ]
 
 [tool.coverage.run]
