@@ -417,7 +417,7 @@ def generate_stripe_reference(ref_array, sci_model):
     Parameters
     ----------
     ref_array : ndarray
-        The reference array to be sliced.
+        The reference array to be sliced. Assumed to be full size along the slow axis.
     sci_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The science datamodel.
 
@@ -609,8 +609,6 @@ def collate_superstripes(input_model):
                 s_reg = sub_range[stripe][repeat]
                 f_reg = [int(r - det_slow_start) for r in full_range[stripe][repeat]]
 
-                # TODO: scale the science data by the timing offset?
-
                 # Propagate the science data
                 newdata[integ, group, f_reg[0] : f_reg[1], :] = olddata[
                     stripe_idx, old_group_idx, s_reg[0] : s_reg[1], :
@@ -653,6 +651,8 @@ def collate_superstripes(input_model):
     new_model = generate_stripe_int_times(new_model)
     new_model = clean_superstripe_metadata(new_model, slow_start=sci_slow_start)
 
+    # TODO: add a read_pattern to describe the readtimes for the new groups
+
     return new_model
 
 
@@ -675,12 +675,13 @@ def clean_superstripe_metadata(input_model, slow_start=1):
         The model cleaned of metadata indicating the presence
         of superstripe data.
     """
-    input_model.meta.exposure.integration_start = np.ceil(
-        input_model.meta.exposure.integration_start / input_model.meta.subarray.num_superstripe
-    ).astype(int)
-    input_model.meta.exposure.integration_end = np.ceil(
-        input_model.meta.exposure.integration_end / input_model.meta.subarray.num_superstripe
-    ).astype(int)
+    if input_model.meta.exposure.integration_start is not None:
+        input_model.meta.exposure.integration_start = np.ceil(
+            input_model.meta.exposure.integration_start / input_model.meta.subarray.num_superstripe
+        ).astype(int)
+        input_model.meta.exposure.integration_end = np.ceil(
+            input_model.meta.exposure.integration_end / input_model.meta.subarray.num_superstripe
+        ).astype(int)
     input_model.meta.exposure.nints = np.ceil(
         input_model.meta.exposure.nints / input_model.meta.subarray.num_superstripe
     ).astype(int)
@@ -731,7 +732,10 @@ def generate_stripe_int_times(input_model):
 
     nstr = input_model.meta.subarray.num_superstripe
     nints_sci = len(input_model.int_times) // nstr
-    int_start = int(np.ceil(input_model.meta.exposure.integration_start / nstr))
+    if input_model.meta.exposure.integration_start is not None:
+        int_start = int(np.ceil(input_model.meta.exposure.integration_start / nstr))
+    else:
+        int_start = 1
 
     otab = np.array(
         list(
