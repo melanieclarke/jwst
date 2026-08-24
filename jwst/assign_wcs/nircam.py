@@ -290,9 +290,11 @@ def tsgrism(input_model, reference_files):
     TSGRISM is only slated to work with GRISMR or DHS pupil elements and Module A.
 
     For this mode, the source is typically at crpix1 x crpix2, which
-    are stored in keywords XREF_SCI, YREF_SCI.
-    offset special requirements may be encoded in the X_OFFSET parameter,
-    but those are handled in extract_2d.
+    are stored in keywords XREF_SCI, YREF_SCI, plus an offset from the TA
+    to the grism pupil, plus any additional special requirement offsets requested
+    by the user in APT. Offsets are stored in the X_OFFSET, Y_OFFSET keywords
+    and are incorporated into the shifts for the grism detector to direct image
+    transform.
     """
     # make sure this is a grism image
     if "NRC_TSGRISM" != input_model.meta.exposure.type:
@@ -324,8 +326,7 @@ def tsgrism(input_model, reference_files):
     # For this mode (tsgrism), it is assumed that the source is
     # at the nominal aperture reference point, i.e.,
     # crpix1 <--> xref_sci and crpix2 <--> yref_sci
-    # offsets in X are handled in extract_2d, e.g. if an offset
-    # special requirement was specified in the APT.
+    # plus offsets stored in x_offset and y_offset
     xc, yc = (input_model.meta.wcsinfo.siaf_xref_sci, input_model.meta.wcsinfo.siaf_yref_sci)
 
     if xc is None:
@@ -346,23 +347,35 @@ def tsgrism(input_model, reference_files):
     # Using the sky model, update the center position to get
     # the offset into the direct image frame
     x_off, y_off = input_model.meta.dither.x_offset, input_model.meta.dither.y_offset
-    idltov23 = IdealToV2V3(
-        input_model.meta.wcsinfo.v3yangle,
-        input_model.meta.wcsinfo.v2_ref,
-        input_model.meta.wcsinfo.v3_ref,
-        input_model.meta.wcsinfo.vparity,
-    )
-    v2_offset, v3_offset = idltov23(x_off, y_off)
-    xc_off, yc_off, _, _ = distortion.inverse(v2_offset, v3_offset, np.nan, 1)
-    v2_0, v3_0 = idltov23(0, 0)
-    xc_0, yc_0, _, _ = distortion.inverse(v2_0, v3_0, np.nan, 1)
-    if np.all(np.isfinite([xc_off, y_off, xc_0, yc_0])):
-        xc += xc_off - xc_0
-        yc += yc_off - yc_0
+    applied_offsets = False
+    if x_off is not None and y_off is not None:
+        idltov23 = IdealToV2V3(
+            input_model.meta.wcsinfo.v3yangle,
+            input_model.meta.wcsinfo.v2_ref,
+            input_model.meta.wcsinfo.v3_ref,
+            input_model.meta.wcsinfo.vparity,
+        )
+        v2_offset, v3_offset = idltov23(x_off, y_off)
+        xc_off, yc_off, _, _ = distortion.inverse(v2_offset, v3_offset, np.nan, 1)
+        v2_0, v3_0 = idltov23(0, 0)
+        xc_0, yc_0, _, _ = distortion.inverse(v2_0, v3_0, np.nan, 1)
+        if np.all(np.isfinite([xc_off, yc_off, xc_0, yc_0])):
+            xc += xc_off - xc_0
+            yc += yc_off - yc_0
 
-        # Update siaf reference
-        input_model.meta.wcsinfo.siaf_xref_sci = xc + 1
-        input_model.meta.wcsinfo.siaf_yref_sci = yc + 1
+            # Update siaf reference
+            input_model.meta.wcsinfo.siaf_xref_sci = xc + 1
+            input_model.meta.wcsinfo.siaf_yref_sci = yc + 1
+
+            applied_offsets = True
+
+    if not applied_offsets:
+        log.warning(
+            "Offsets stored in X_OFFSET and Y_OFFSET could not "
+            "be applied to the reference position."
+        )
+        log.warning("The SIAF reference position is used without correction.")
+        log.warning("Output source position and wavelength calibration may be inaccurate.")
 
     xcenter = Const1D(xc)
     xcenter.inverse = Const1D(xc)

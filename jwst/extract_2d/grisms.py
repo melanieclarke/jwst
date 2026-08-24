@@ -76,11 +76,6 @@ def build_grism_submodel(
     source_ypos : float, optional
         The y position of the source in the direct image frame (0-indexed).
         When provided, sets ``sub_model.source_ypos``.
-
-    Returns
-    -------
-    `~stdatamodels.jwst.datamodels.SlitModel`
-        The ``sub_model`` updated in-place.
     """
     # Cut out the subarray from the input data arrays
     ext_data = input_model.data[..., ymin : ymax + 1, xmin : xmax + 1].copy()
@@ -304,6 +299,9 @@ def _extract_tso_tsgrism_object(
         extract_y_max = extract_y_min + tsgrism_extract_height - 1
 
         # Limit the bounding box to the detector edges
+        # Note: in contrast to WFSS modes, the instrument team requested that the
+        # entire detector be extracted in the x-direction, rather than determining
+        # the min/max values for x from the min/max wavelength values in the WCS.
         ny, nx = input_model.data.shape[-2:]
         ymin = int(np.clip(extract_y_min, 0, ny - 1))
         ymax = int(np.clip(extract_y_max, ymin, ny - 1))

@@ -132,8 +132,11 @@ def create_imaging_wcs():
 
 
 @pytest.fixture
-def create_tso_wcs(filtername=tsgrism_filters[2], subarray="SUBGRISM256"):
+def create_tso_wcs():
     """Help create tsgrism GWCS object."""
+    filtername = tsgrism_filters[2]
+    subarray = "SUBGRISM256"
+
     hdul = create_hdul(
         exptype="NRC_TSGRISM",
         pupil="GRISMR",
@@ -186,6 +189,7 @@ def tsgrism_inputs(request):
         )
 
         image_model = CubeModel(hdu)
+        image_model.data = np.zeros((10, 10, 10))
 
         return image_model, get_reference_files(image_model)
 
@@ -265,6 +269,15 @@ def test_traverse_tso_grism(create_tso_wcs):
     # Check round trip
     assert np.isclose(x, xin, atol=2e-2)
     assert np.isclose(y, yin, atol=2e-2)
+
+
+def test_tsgrism_offset_warning(caplog, tsgrism_inputs):
+    # Run the pipeline on data missing x/y offsets
+    nircam.tsgrism(*tsgrism_inputs())
+
+    # A warning is logged
+    assert "could not be applied" in caplog.text
+    assert "may be inaccurate" in caplog.text
 
 
 def test_imaging_frames():
