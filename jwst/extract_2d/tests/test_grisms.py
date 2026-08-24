@@ -182,7 +182,7 @@ def create_tso_wcsimage(filtername="F277W", subarray=False):
     im.meta.wcsinfo.siaf_xref_sci = 887.0
     im.meta.wcsinfo.siaf_yref_sci = 35.0
     im.meta.dither.x_offset = 0
-    im.meta.dither.y_offset = 0
+    im.meta.dither.y_offset = 1.45
     aswcs = AssignWcsStep()
     return aswcs.process(im)
 
@@ -399,9 +399,13 @@ def test_extract_tso_height():
     wcsimage = create_tso_wcsimage(subarray=False)
     refs = get_reference_files(wcsimage)
     outmodel = extract_tso_object(wcsimage, tsgrism_extract_height=50, reference_files=refs)
+
     assert isinstance(outmodel, SlitModel)
+
+    original_source_y = 34
+    shifted_source_y = 25
     assert outmodel.source_xpos == (outmodel.meta.wcsinfo.siaf_xref_sci - 1)
-    assert outmodel.source_ypos == 25
+    assert outmodel.source_ypos == shifted_source_y
     assert outmodel.source_id == 1
     assert outmodel.xstart > 0
     assert outmodel.ystart > 0
@@ -417,6 +421,26 @@ def test_extract_tso_height():
     assert num == wcsimage.data.shape[0]
     assert ysize == 50
     assert xsize == NIRCAM_TSO_WIDTH
+
+    # check the cutout WCS is shifted appropriately
+    xin, order = 5, 1
+    orig_ra, orig_dec, orig_lam, _ = wcsimage.meta.wcs(xin, original_source_y, order)
+    ra, dec, lam, _ = outmodel.meta.wcs(xin, shifted_source_y)
+    assert np.allclose([ra, dec, lam], [orig_ra, orig_dec, orig_lam])
+
+    orig_xout, orig_yout, _ = wcsimage.meta.wcs.backward_transform(
+        orig_ra, orig_dec, orig_lam, order
+    )
+    xout, yout = outmodel.meta.wcs.backward_transform(ra, dec, lam, order)
+
+    # X should round trip within a few hundredths of a pixel
+    assert np.allclose([orig_xout, xout], xin, atol=0.02)
+
+    # Y should round trip within a few tenths -- the source position is close
+    # to the trace at x0 but not exactly on top of it
+    assert np.isclose(orig_yout, original_source_y, atol=0.2)
+    assert np.isclose(yout, shifted_source_y, atol=0.2)
+
     del outmodel
 
 
