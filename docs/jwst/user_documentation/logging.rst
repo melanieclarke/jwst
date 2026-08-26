@@ -202,15 +202,13 @@ command line configuration options as follows.
 These features, formerly supported by ``logcfg``, are no longer available
 via the command line:
 
-#. ``break_level``: The level at and above which logging messages
-   will cause an exception to be raised.  For instance, if you
-   would rather stop execution at the first ERROR message (rather
-   than continue), set ``break_level`` to ``ERROR``.
+#. ``break_level``: the level at and above which logging messages
+   will cause an exception to be raised
 
-#. ``append:filename.log`` to append the log messages to the given file.
+#. ``append:filename.log``: a switch to append the log messages to the given
+   file instead of overwriting the file
 
-#. ``format``: Allows one to customize what each log message
-   contains.
+#. ``format``: custom string formatting for log messages.
 
 These advanced features may still be implemented in Python code via the
 `logging` module.
