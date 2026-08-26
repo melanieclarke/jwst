@@ -73,8 +73,6 @@ To turn off all logging instead:
 
     strun calwebb_detector1 jw00017001001_01101_00001_nrca1_uncal.fits --log-stream=null
 
-CRDS messages may still display, since its logger is separately configured.
-
 In Python Code
 --------------
 
@@ -172,8 +170,8 @@ Migration guide for ``logcfg``
 ------------------------------
 
 Prior to ``jwst`` version 1.20.0, the primary method for log configuration was
-via a logging configuration file (``logcfg``).  Support for ``logcfg`` is now
-deprecated and will be removed in a future build.
+via a logging configuration file (``logcfg``).  Support for ``logcfg`` has now
+been removed.
 
 For Python code, non-default logging configuration should be implemented via
 the `logging` module (see the examples above).  For the command line,
@@ -201,7 +199,7 @@ command line configuration options as follows.
    **Via the command line, specify a log file name with "--log-file".**
    **Specify the output stream with "--log-stream".**
 
-These features, formerly supported by ``logcfg``, will no longer be available
+These features, formerly supported by ``logcfg``, are no longer available
 via the command line:
 
 #. ``break_level``: The level at and above which logging messages
