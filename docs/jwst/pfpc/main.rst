@@ -18,7 +18,7 @@ obtain higher signal-to-noise ratio spectra using the PFPC approach compared to 
 :ref:`x1d <x1d>` data products.  The PFPC method can be particularly helpful for MIRI MRS,
 which is affected by large spectral fringes caused by multiple reflections within the MIRI detectors
 and optical elements (see discussion on
-`JDox <https://jwst-docs.stsci.edu/known-issues/miri-known-issues/miri-mrs-known-issues>`).
+`JDox <https://jwst-docs.stsci.edu/known-issues/miri-known-issues/miri-mrs-known-issues>`__).
 
 
 Wavelength-dependent correction vectors for each supported mode and dither position are derived from
