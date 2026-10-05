@@ -83,7 +83,7 @@ After all spectra are corrected, they are averaged with sigma clipping across al
 create one final spectrum for each band. Residual fringes are further corrected with the
 :func:`~jwst.residual_fringe.utils.fit_residual_fringes_1d` function. The output spectra are
 stored in a format identical to the :ref:`x1d <x1d>` product, with the PFPC-corrected flux
-and surface brightness respectively stored in `FLUX' and `SURF_BRIGHT' columns in a binary table,
+and surface brightness respectively stored in ``FLUX`` and ``SURF_BRIGHT`` columns in a binary table,
 and the PFPC+residual fringe corrected spectra stored in `RF_FLUX' and `RF_SURF_BRIGHT' columns.
 
 
