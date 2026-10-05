@@ -14,8 +14,8 @@ for known and stable fixed-pattern noise at each dither position caused by flat 
 sampling artifacts, and (in the case of MIRI MRS) residual fringes.
 
 Programs that observe bright point sources can sometimes
-obtain higher signal-to-noise ratio spectra using the ``pfpc`` approach compared to the regular
-:ref:`x1d <x1d>` data products.  The ``pfpc`` method can be particularly helpful for the MIRI MRS,
+obtain higher signal-to-noise ratio spectra using the PFPC approach compared to the regular
+:ref:`x1d <x1d>` data products.  The PFPC method can be particularly helpful for MIRI MRS,
 which is affected by large spectral fringes caused by multiple reflections within the MIRI detectors
 and optical elements (see discussion on
 `JDox <https://jwst-docs.stsci.edu/known-issues/miri-known-issues/miri-mrs-known-issues>`).
