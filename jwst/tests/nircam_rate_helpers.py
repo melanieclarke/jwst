@@ -130,6 +130,8 @@ def nircam_tsgrism_rateints_model(filtername="F322W2", with_wcs=True):
 
     Parameters
     ----------
+    filtername : str, optional
+        Filter name.
     with_wcs : bool, optional
         If True, assign a WCS to the output model.
 
@@ -167,6 +169,8 @@ def nircam_wfss_rate_model(pupil="GRISMR", with_wcs=True):
 
     Parameters
     ----------
+    pupil : str, optional
+        Pupil name.
     with_wcs : bool, optional
         If True, assign a WCS to the output model.
 

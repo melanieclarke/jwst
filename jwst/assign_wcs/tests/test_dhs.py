@@ -10,7 +10,7 @@ from jwst.assign_wcs.tests.helpers import (
     make_mock_dhs_nrca1_regions,
     make_mock_dhs_nrcalong_rate,
 )
-from jwst.assign_wcs.tests.test_nircam import get_reference_files
+from jwst.tests.wcs_helpers import get_reference_files
 
 
 @pytest.fixture
