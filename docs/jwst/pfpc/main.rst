@@ -52,8 +52,7 @@ For each input exposure, the correction process is:
 1. Check that the exposure can be corrected. If any of the following conditions
    are not met, no further processing is performed:
 
-   - The :ref:`PFPC reference file <pfpc_reffile>` must contain a correction matching the observed spectral
-    band and dither pattern.
+   - The :ref:`PFPC reference file <pfpc_reffile>` must contain a correction matching the observed spectral band and dither pattern.
    - The exposure must be a point source (``SRCTYPE = "POINT"``).
    - The exposure must have been obtained using target acquisition to ensure accurate source positioning.
 
