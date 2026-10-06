@@ -71,7 +71,7 @@ def _nircam_rate_hdul(
     detector="NRCALONG",
     channel="LONG",
     module="A",
-    filtername="F444W",
+    filter_name="F444W",
     exptype="NRC_IMAGE",
     pupil="GRISMR",
     subarray="FULL",
@@ -83,11 +83,11 @@ def _nircam_rate_hdul(
     hdul = fits.HDUList()
     phdu = fits.PrimaryHDU()
     phdu.header["TELESCOP"] = "JWST"
-    phdu.header["FILENAME"] = "test+" + filtername
+    phdu.header["FILENAME"] = "test+" + filter_name
     phdu.header["INSTRUME"] = "NIRCAM"
     phdu.header["CHANNEL"] = channel
     phdu.header["DETECTOR"] = detector
-    phdu.header["FILTER"] = filtername
+    phdu.header["FILTER"] = filter_name
     phdu.header["PUPIL"] = pupil
     phdu.header["MODULE"] = module
     phdu.header["TIME-OBS"] = "8:59:37"
@@ -129,7 +129,7 @@ def nircam_image_rate_model(with_wcs=True):
     return model
 
 
-def nircam_tsgrism_rate_model(filtername="F322W2", with_wcs=True):
+def nircam_tsgrism_rate_model(filter_name="F322W2", with_wcs=True):
     """
     Create a mock NIRCam TSGRISM rateints model.
 
@@ -137,7 +137,7 @@ def nircam_tsgrism_rate_model(filtername="F322W2", with_wcs=True):
 
     Parameters
     ----------
-    filtername : str, optional
+    filter_name : str, optional
         Filter name.
     with_wcs : bool, optional
         If True, assign a WCS to the output model.
@@ -150,7 +150,7 @@ def nircam_tsgrism_rate_model(filtername="F322W2", with_wcs=True):
     hdul = _nircam_rate_hdul(
         exptype="NRC_TSGRISM",
         pupil="GRISMR",
-        filtername=filtername,
+        filter_name=filter_name,
         detector="NRCALONG",
         subarray="SUBGRISM256",
         wcskeys=TSO_WCS_KW,
@@ -186,7 +186,7 @@ def nircam_wfss_rate_model(pupil="GRISMR", with_wcs=True):
     model : `~stdatamodels.jwst.datamodels.CubeModel`
         The NIRCam WFSS datamodel.
     """
-    hdul = _nircam_rate_hdul(exptype="NRC_WFSS", filtername="F444W", pupil=pupil)
+    hdul = _nircam_rate_hdul(exptype="NRC_WFSS", filter_name="F444W", pupil=pupil)
     model = datamodels.ImageModel(hdul)
     model.data = np.zeros((10, 10))
 

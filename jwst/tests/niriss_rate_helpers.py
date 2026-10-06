@@ -34,14 +34,14 @@ DEFAULT_WCS_KW = {
 }
 
 
-def _niriss_rate_hdul(detector="NIS", filtername="CLEAR", exptype="NIS_IMAGE", pupil="F200W"):
+def _niriss_rate_hdul(detector="NIS", filter_name="CLEAR", exptype="NIS_IMAGE", pupil="F200W"):
     hdul = fits.HDUList()
     phdu = fits.PrimaryHDU()
     phdu.header["telescop"] = "JWST"
-    phdu.header["filename"] = "test+" + filtername
+    phdu.header["filename"] = "test+" + filter_name
     phdu.header["instrume"] = "NIRISS"
     phdu.header["detector"] = detector
-    phdu.header["FILTER"] = filtername
+    phdu.header["FILTER"] = filter_name
     phdu.header["PUPIL"] = pupil
     phdu.header["time-obs"] = "8:59:37"
     phdu.header["date-obs"] = "2022-09-05"
@@ -72,7 +72,7 @@ def niriss_image_rate_model(with_wcs=True):
     model : `~stdatamodels.jwst.datamodels.ImageModel`
         The NIRISS image datamodel.
     """
-    model = datamodels.ImageModel(_niriss_rate_hdul(filtername="F200W", pupil="CLEAR"))
+    model = datamodels.ImageModel(_niriss_rate_hdul(filter_name="F200W", pupil="CLEAR"))
 
     if with_wcs:
         ref = get_reference_files(model)
@@ -82,7 +82,7 @@ def niriss_image_rate_model(with_wcs=True):
     return model
 
 
-def niriss_wfss_rate_model(filtername="GR150R", with_wcs=True):
+def niriss_wfss_rate_model(filter_name="GR150R", with_wcs=True):
     """
     Create a mock NIRISS WFSS rate model.
 
@@ -90,7 +90,7 @@ def niriss_wfss_rate_model(filtername="GR150R", with_wcs=True):
 
     Parameters
     ----------
-    filtername : str, optional
+    filter_name : str, optional
         Filter name.
     with_wcs : bool, optional
         If True, assign a WCS to the output model.
@@ -100,7 +100,7 @@ def niriss_wfss_rate_model(filtername="GR150R", with_wcs=True):
     model : `~stdatamodels.jwst.datamodels.ImageModel`
         The NIRISS WFSS datamodel.
     """
-    hdul = _niriss_rate_hdul(filtername=filtername, pupil="F200W", exptype="NIS_WFSS")
+    hdul = _niriss_rate_hdul(filter_name=filter_name, pupil="F200W", exptype="NIS_WFSS")
     model = datamodels.ImageModel(hdul)
 
     if with_wcs:

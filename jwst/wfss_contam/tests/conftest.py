@@ -168,7 +168,7 @@ def grism_wcs():
     `~gwcs.wcs.WCS`
         The grism wcs object.
     """
-    return niriss_wfss_rate_model(filtername="GR150C").meta.wcs
+    return niriss_wfss_rate_model(filter_name="GR150C").meta.wcs
 
 
 @pytest.fixture(scope="module")

@@ -27,8 +27,8 @@ def test_niriss_wfss_available_frames():
         assert all([a == b for a, b in zip(niriss_wfss_frames, available_frames)])
 
 
-def traverse_wfss_trace(filtername):
-    wcsobj = helpers.niriss_wfss_rate_model(filtername).meta.wcs
+def traverse_wfss_trace(filter_name):
+    wcsobj = helpers.niriss_wfss_rate_model(filter_name=filter_name).meta.wcs
     detector_to_grism = wcsobj.get_transform("detector", "grism_detector")
     grism_to_detector = wcsobj.get_transform("grism_detector", "detector")
 

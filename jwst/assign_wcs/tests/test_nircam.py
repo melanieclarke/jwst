@@ -30,7 +30,7 @@ nircam_imaging_frames = ["detector", "v2v3", "v2v3vacorr", "world"]
 @pytest.fixture(scope="module", params=tsgrism_filters)
 def tsgrism_inputs(request):
     def _add_missing_key(missing_key=None, missing_offsets=False):
-        model = helpers.nircam_tsgrism_rate_model(filtername=request.param, with_wcs=False)
+        model = helpers.nircam_tsgrism_rate_model(filter_name=request.param, with_wcs=False)
         if missing_key is not None:
             setattr(model.meta.wcsinfo, missing_key, None)
         if missing_offsets:
