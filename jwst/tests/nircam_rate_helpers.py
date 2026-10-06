@@ -8,7 +8,7 @@ from stdatamodels.jwst import datamodels
 from jwst.assign_wcs import nircam
 from jwst.tests.wcs_helpers import get_reference_files
 
-__all_ = ["nircam_image_model", "nircam_tsgrism_rateints_model", "nircam_wfss_rate_model"]
+__all_ = ["nircam_image_model", "nircam_tsgrism_rate_model", "nircam_wfss_rate_model"]
 
 # Default wcs information
 DEFAULT_WCS_KW = {
@@ -122,7 +122,7 @@ def nircam_image_rate_model(with_wcs=True):
     return model
 
 
-def nircam_tsgrism_rateints_model(filtername="F322W2", with_wcs=True):
+def nircam_tsgrism_rate_model(filtername="F322W2", with_wcs=True):
     """
     Create a mock NIRCam TSGRISM rateints model.
 
@@ -138,7 +138,7 @@ def nircam_tsgrism_rateints_model(filtername="F322W2", with_wcs=True):
     Returns
     -------
     model : `~stdatamodels.jwst.datamodels.CubeModel`
-        The NIRCam image datamodel.
+        The NIRCam TSGRISM datamodel.
     """
     hdul = _nircam_rate_hdul(
         exptype="NRC_TSGRISM",
@@ -177,7 +177,7 @@ def nircam_wfss_rate_model(pupil="GRISMR", with_wcs=True):
     Returns
     -------
     model : `~stdatamodels.jwst.datamodels.CubeModel`
-        The NIRCam image datamodel.
+        The NIRCam WFSS datamodel.
     """
     hdul = _nircam_rate_hdul(exptype="NRC_WFSS", filtername="F444W", pupil=pupil)
     model = datamodels.ImageModel(hdul)

@@ -70,7 +70,7 @@ def niriss_image_rate_model(with_wcs=True):
     Returns
     -------
     model : `~stdatamodels.jwst.datamodels.ImageModel`
-        The NIRCam image datamodel.
+        The NIRISS image datamodel.
     """
     model = datamodels.ImageModel(_niriss_rate_hdul(filtername="F200W", pupil="CLEAR"))
 
@@ -98,7 +98,7 @@ def niriss_wfss_rate_model(filtername="GR150R", with_wcs=True):
     Returns
     -------
     model : `~stdatamodels.jwst.datamodels.ImageModel`
-        The NIRCam image datamodel.
+        The NIRISS WFSS datamodel.
     """
     hdul = _niriss_rate_hdul(filtername=filtername, pupil="F200W", exptype="NIS_WFSS")
     model = datamodels.ImageModel(hdul)

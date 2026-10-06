@@ -30,7 +30,7 @@ nircam_imaging_frames = ["detector", "v2v3", "v2v3vacorr", "world"]
 @pytest.fixture(scope="module", params=tsgrism_filters)
 def tsgrism_inputs(request):
     def _add_missing_key(missing_key=None, missing_offsets=False):
-        model = helpers.nircam_tsgrism_rateints_model(filtername=request.param, with_wcs=False)
+        model = helpers.nircam_tsgrism_rate_model(filtername=request.param, with_wcs=False)
         if missing_key is not None:
             setattr(model.meta.wcsinfo, missing_key, None)
         if missing_offsets:
@@ -51,7 +51,7 @@ def test_nircam_wfss_available_frames():
 
 def test_nircam_tso_available_frames():
     """Make sure that the expected GWCS reference frames for TSO are created."""
-    wcsobj = helpers.nircam_tsgrism_rateints_model().meta.wcs
+    wcsobj = helpers.nircam_tsgrism_rate_model().meta.wcs
     available_frames = wcsobj.available_frames
     assert all([a == b for a, b in zip(nircam_tsgrism_frames, available_frames)])
 
@@ -94,7 +94,7 @@ def test_traverse_wfss_grisms():
 def test_traverse_tso_grism():
     """Make sure that the TSO dispersion polynomials are reversible.
     All assert statements are in pixel space so 1/1000 px seems easily acceptable"""
-    wcsobj = helpers.nircam_tsgrism_rateints_model().meta.wcs
+    wcsobj = helpers.nircam_tsgrism_rate_model().meta.wcs
     detector_to_grism = wcsobj.get_transform("direct_image", "grism_detector")
     grism_to_detector = wcsobj.get_transform("grism_detector", "direct_image")
 
