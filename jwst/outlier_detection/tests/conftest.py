@@ -7,10 +7,10 @@ from stdatamodels.jwst import datamodels
 
 from jwst.assign_wcs import AssignWcsStep
 from jwst.assign_wcs.tests.test_miri import create_hdul
-from jwst.assign_wcs.tests.test_nirspec import create_nirspec_ifu_file
 from jwst.datamodels import ModelContainer
 from jwst.outlier_detection.tests import helpers
 from jwst.tests.helpers import _help_pytest_warns
+from jwst.tests.spec_cal_helpers import nirspec_ifu_cal_model
 
 
 @pytest.fixture()
@@ -298,16 +298,10 @@ def nirspec_ifu_rate():
         A NIRSpec IFU model with a wcs assigned.
     """
     shape = (2048, 2048)
-    hdul = create_nirspec_ifu_file(
-        grating="PRISM", filter="CLEAR", gwa_xtil=0.35986012, gwa_ytil=0.13448857, gwa_tilt=37.1
-    )
-    model = datamodels.IFUImageModel(hdul)
+    model = nirspec_ifu_cal_model()
     model.data = np.arange(shape[0] * shape[1], dtype=np.float32).reshape(shape)
     model.err = np.full(shape, 1.0)
     model.dq = np.full(shape, 0)
-    model_wcs = AssignWcsStep.call(model)
 
-    hdul.close()
+    yield model
     model.close()
-    yield model_wcs
-    model_wcs.close()
