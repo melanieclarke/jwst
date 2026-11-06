@@ -1198,6 +1198,12 @@ def get_mosaic_member_tweak(input_model):
     matrix, shift = None, None
     direct_file = input_model.meta.direct_image
 
+    # Check for a direct image
+    if direct_file is None:
+        log.warning("No direct image file identified.")
+        return matrix, shift
+
+    # Try to open the direct image
     try:
         with ImageModel(direct_file) as direct:
             tweak_table = getattr(direct, "tweak_table", None)
@@ -1205,10 +1211,12 @@ def get_mosaic_member_tweak(input_model):
         log.warning(f"Direct image file {direct_file} not found.")
         return matrix, shift
 
+    # Check if there was a tweak table
     if tweak_table is None:
         log.info("Direct image does not contain WCS tweaks; none applied.")
         return matrix, shift
 
+    # Check for a matching visit id
     visit_id = input_model.meta.observation.visit_id
     match_visit = tweak_table["VISIT_ID"] == visit_id
     if not np.any(match_visit):
@@ -1217,8 +1225,10 @@ def get_mosaic_member_tweak(input_model):
 
     matches = tweak_table[match_visit]
     if len(matches) == 1:
+        # Just one match for the visit id
         match = matches[0]
     else:
+        # Multiple matches - take the closest
         spec_coord = coord.SkyCoord(
             input_model.meta.wcsinfo.ra_ref,
             input_model.meta.wcsinfo.dec_ref,
